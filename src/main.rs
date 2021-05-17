@@ -45,6 +45,9 @@ impl Pos {
         self.mov(new_dir);
         new_dir
     }
+    fn hit(&self, pos: Pos) -> bool {
+        self.x == pos.x && self.y == pos.y
+    }
 }
 
 struct Character {
@@ -76,6 +79,7 @@ struct GameData {
     h: u16,
     stdout: Mutex<Stdout>,
     players: Mutex<(Character, Character)>,
+    missiles: Mutex<Vec<Character>>,
 }
 
 impl Game {
@@ -90,6 +94,7 @@ impl Game {
                 Character::new(quarter, h / 2, Dir::Right),
                 Character::new(quarter * 3, h / 2, Dir::Left),
             )),
+            missiles: Mutex::new(Vec::new()),
         };
         let g = Game { data: Arc::new(gd) };
 
@@ -121,20 +126,33 @@ impl Game {
                     KeyCode::Char('s') => self.data.players.lock().unwrap().0.dir = Dir::Down,
                     KeyCode::Char('a') => self.data.players.lock().unwrap().0.dir = Dir::Left,
                     KeyCode::Char('d') => self.data.players.lock().unwrap().0.dir = Dir::Right,
-                    //KeyCode::Tab => self.fire(Player::One),
+                    KeyCode::Tab => {
+                        let p = &self.data.players.lock().unwrap().0;
+                        self.fire(p.pos, p.dir);
+                    }
 
                     // player two keys
                     KeyCode::Up => self.data.players.lock().unwrap().1.dir = Dir::Up,
                     KeyCode::Down => self.data.players.lock().unwrap().1.dir = Dir::Down,
                     KeyCode::Left => self.data.players.lock().unwrap().1.dir = Dir::Left,
                     KeyCode::Right => self.data.players.lock().unwrap().1.dir = Dir::Right,
-                    //KeyCode::Char('m') => self.fire(Player::Two),
+                    KeyCode::Char('m') => {
+                        let p = &self.data.players.lock().unwrap().1;
+                        self.fire(p.pos, p.dir);
+                    }
                     _ => (),
                 }
             }
         }
 
         Ok(())
+    }
+
+    fn fire(&self, start_pos: Pos, dir: Dir) {
+        self.data.missiles.lock().unwrap().push(Character {
+            pos: start_pos,
+            dir,
+        });
     }
 
     fn draw_board(&self) -> Result<(), Box<dyn Error>> {
@@ -184,6 +202,21 @@ fn draw_loop(data: Arc<GameData>) {
         if move_players {
             animate(&mut stdout, &mut p_lock.0, "1", data.w, data.h);
             animate(&mut stdout, &mut p_lock.1, "2", data.w, data.h);
+        }
+        for m in data.missiles.lock().unwrap().iter_mut() {
+            animate(&mut stdout, m, "*", data.w, data.h);
+            if m.pos.hit(p_lock.0.pos) {
+                queue!(stdout, style::Print("BOOM"));
+            }
+            if m.pos.hit(p_lock.1.pos) {
+                queue!(stdout, style::Print("BOOM"));
+            }
+
+            // TODO: move draw_loop to main loop
+            // move keyboard to thread
+            // main loop checks a sync bool every loop
+            // keyboard 'q' sets the bool to mark we should exit
+            // change 'q' key to Esc because q too close to player 1 keys
         }
         stdout.flush().unwrap();
         drop(p_lock);
