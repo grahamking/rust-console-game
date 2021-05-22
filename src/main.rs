@@ -2,8 +2,12 @@ use crossterm::event::KeyCode;
 use crossterm::{cursor, event, execute, queue, style, terminal}; // QueueableCommand};
 use std::error::Error;
 use std::io::{stdout, Stdout, Write};
-use std::sync::{Arc, Mutex};
-use std::{thread, time};
+use std::sync::MutexGuard;
+use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc, Mutex};
+use std::{thread, time::Duration};
+
+const FRAME_GAP_MS: u64 = 40;
+const START_LIVES: usize = 5;
 
 #[derive(Copy, Clone)]
 enum Dir {
@@ -51,27 +55,37 @@ impl Pos {
 }
 
 struct Character {
+    name: String,
     pos: Pos,
     dir: Dir,
+    lives: usize,
 }
 impl Character {
-    fn new(x: u16, y: u16, dir: Dir) -> Character {
+    fn new(name: String, x: u16, y: u16, dir: Dir) -> Character {
         Character {
             pos: Pos { x, y },
+            name,
             dir,
+            lives: 5,
         }
     }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut g = Game::new()?;
-    g.main_loop()?;
-
-    Ok(())
+    let g = Game::new()?;
+    let winner = g.main_loop();
+    match winner {
+        Ok(None) => Ok(()),
+        Ok(Some(winner)) => {
+            println!("\n{} WINS !!\n", winner);
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 struct Game {
-    data: Arc<GameData>,
+    data: GameData,
 }
 
 struct GameData {
@@ -80,10 +94,12 @@ struct GameData {
     stdout: Mutex<Stdout>,
     players: Mutex<(Character, Character)>,
     missiles: Mutex<Vec<Character>>,
+    is_running: AtomicBool,
+    winner: Mutex<Option<String>>,
 }
 
 impl Game {
-    fn new() -> Result<Game, Box<dyn Error>> {
+    fn new() -> Result<Arc<Game>, Box<dyn Error>> {
         let (w, h) = terminal::size()?;
         let quarter = w / 4;
         let gd = GameData {
@@ -91,12 +107,14 @@ impl Game {
             h,
             stdout: Mutex::new(stdout()),
             players: Mutex::new((
-                Character::new(quarter, h / 2, Dir::Right),
-                Character::new(quarter * 3, h / 2, Dir::Left),
+                Character::new("Player One".to_string(), quarter, h / 2, Dir::Right),
+                Character::new("Player Two".to_string(), quarter * 3, h / 2, Dir::Left),
             )),
             missiles: Mutex::new(Vec::new()),
+            is_running: AtomicBool::new(true),
+            winner: Mutex::new(None),
         };
-        let g = Game { data: Arc::new(gd) };
+        let g = Arc::new(Game { data: gd });
 
         terminal::enable_raw_mode()?;
         queue!(
@@ -108,60 +126,171 @@ impl Game {
 
         g.draw_board()?;
 
-        let gd2 = g.data.clone();
-        let _ = thread::spawn(move || draw_loop(gd2));
+        let g3 = g.clone();
+        let _ = thread::spawn(move || g3.input_loop());
 
         Ok(g)
     }
 
-    fn main_loop(&mut self) -> Result<(), Box<dyn Error>> {
-        'top: loop {
-            if let event::Event::Key(e) = event::read()? {
-                match e.code {
-                    // quit
-                    KeyCode::Char('q') => break 'top,
+    // Returns the player who won, or None if quit from keyboard
+    fn main_loop(&self) -> Result<Option<String>, Box<dyn Error>> {
+        let mut move_players = true;
 
-                    // player one keys
-                    KeyCode::Char('w') => self.data.players.lock().unwrap().0.dir = Dir::Up,
-                    KeyCode::Char('s') => self.data.players.lock().unwrap().0.dir = Dir::Down,
-                    KeyCode::Char('a') => self.data.players.lock().unwrap().0.dir = Dir::Left,
-                    KeyCode::Char('d') => self.data.players.lock().unwrap().0.dir = Dir::Right,
-                    KeyCode::Tab => {
-                        let p = &self.data.players.lock().unwrap().0;
-                        self.fire(p.pos, p.dir);
-                    }
+        while self.data.is_running.load(Ordering::Relaxed) {
+            if self.draw_frame(move_players) {
+                break;
+            }
+            move_players = !move_players;
+            thread::sleep(Duration::from_millis(FRAME_GAP_MS));
+        }
+        self.data.is_running.store(false, Ordering::Relaxed);
+        // wait for input_loop to exit
+        thread::sleep(Duration::from_millis(FRAME_GAP_MS + 5));
 
-                    // player two keys
-                    KeyCode::Up => self.data.players.lock().unwrap().1.dir = Dir::Up,
-                    KeyCode::Down => self.data.players.lock().unwrap().1.dir = Dir::Down,
-                    KeyCode::Left => self.data.players.lock().unwrap().1.dir = Dir::Left,
-                    KeyCode::Right => self.data.players.lock().unwrap().1.dir = Dir::Right,
-                    KeyCode::Char('m') => {
-                        let p = &self.data.players.lock().unwrap().1;
-                        self.fire(p.pos, p.dir);
-                    }
-                    _ => (),
-                }
+        self.cleanup();
+
+        Ok(self.data.winner.lock().unwrap().take())
+    }
+
+    fn cleanup(&self) {
+        let mut sl = self.data.stdout.lock().unwrap();
+        execute!(
+            sl,
+            terminal::Clear(terminal::ClearType::All),
+            cursor::MoveTo(0, self.data.h - 1),
+            cursor::Show
+        )
+        .unwrap();
+        terminal::disable_raw_mode().unwrap();
+    }
+
+    fn input_loop(&self) {
+        while self.data.is_running.load(Ordering::Relaxed) {
+            if event::poll(Duration::from_millis(FRAME_GAP_MS)).unwrap() {
+                self.read_key().unwrap();
             }
         }
+    }
 
+    fn read_key(&self) -> Result<(), Box<dyn Error>> {
+        let ev = event::read()?;
+        let e = match ev {
+            event::Event::Key(e) => e,
+            _ => {
+                return Ok(());
+            }
+        };
+        match e.code {
+            // quit
+            KeyCode::Esc => {
+                // make the main loop and hence the program exit
+                self.data.is_running.store(false, Ordering::Relaxed);
+            }
+
+            // player one keys
+            KeyCode::Char('w') => self.data.players.lock().unwrap().0.dir = Dir::Up,
+            KeyCode::Char('s') => self.data.players.lock().unwrap().0.dir = Dir::Down,
+            KeyCode::Char('a') => self.data.players.lock().unwrap().0.dir = Dir::Left,
+            KeyCode::Char('d') => self.data.players.lock().unwrap().0.dir = Dir::Right,
+            KeyCode::Tab => {
+                let p = &self.data.players.lock().unwrap().0;
+                self.fire(p.pos, p.dir);
+            }
+
+            // player two keys
+            KeyCode::Up => self.data.players.lock().unwrap().1.dir = Dir::Up,
+            KeyCode::Down => self.data.players.lock().unwrap().1.dir = Dir::Down,
+            KeyCode::Left => self.data.players.lock().unwrap().1.dir = Dir::Left,
+            KeyCode::Right => self.data.players.lock().unwrap().1.dir = Dir::Right,
+            KeyCode::Char('m') => {
+                let p = &self.data.players.lock().unwrap().1;
+                self.fire(p.pos, p.dir);
+            }
+            _ => (),
+        }
         Ok(())
+    }
+
+    fn draw_frame(&self, move_players: bool) -> bool {
+        let mut is_end = false;
+        let data = &self.data;
+        let mut stdout = data.stdout.lock().unwrap();
+        let mut p_lock = data.players.lock().unwrap();
+        for m in data.missiles.lock().unwrap().iter_mut() {
+            animate(&mut stdout, m, "*", data.w, data.h);
+            if m.pos.hit(p_lock.0.pos) {
+                queue!(stdout, style::Print("BOOM")).unwrap();
+                p_lock.0.lives -= 1;
+                if p_lock.0.lives == 0 {
+                    is_end = true;
+                    *data.winner.lock().unwrap() = Some(p_lock.1.name.clone());
+                    break;
+                }
+                self.draw_status(&mut stdout, p_lock.0.lives, p_lock.1.lives)
+                    .unwrap();
+            }
+            if m.pos.hit(p_lock.1.pos) {
+                queue!(stdout, style::Print("BOOM")).unwrap();
+                p_lock.1.lives -= 1;
+                if p_lock.1.lives == 0 {
+                    is_end = true;
+                    *data.winner.lock().unwrap() = Some(p_lock.0.name.clone());
+                    break;
+                }
+                self.draw_status(&mut stdout, p_lock.0.lives, p_lock.1.lives)
+                    .unwrap();
+            }
+        }
+        if move_players {
+            animate(&mut stdout, &mut p_lock.0, "1", data.w, data.h);
+            animate(&mut stdout, &mut p_lock.1, "2", data.w, data.h);
+        }
+        stdout.flush().unwrap();
+        is_end
     }
 
     fn fire(&self, start_pos: Pos, dir: Dir) {
         self.data.missiles.lock().unwrap().push(Character {
+            name: "missile".to_string(),
             pos: start_pos,
             dir,
+            lives: 0,
         });
+    }
+
+    fn draw_status(
+        &self,
+        stdout: &mut MutexGuard<Stdout>,
+        p1: usize,
+        p2: usize,
+    ) -> Result<(), Box<dyn Error>> {
+        let third_width = self.data.w / 3;
+        let name_size = "Player X: ".len() as u16 + START_LIVES as u16;
+        let player1 = "Player 1: ".to_string() + &"#".repeat(p1) + &" ".repeat(START_LIVES - p1);
+        let player2 = "Player 2: ".to_string() + &"#".repeat(p2) + &" ".repeat(START_LIVES - p2);
+        queue!(
+            stdout,
+            cursor::MoveTo(third_width - name_size / 2, 0),
+            style::Print(player1),
+            cursor::MoveTo(2 * third_width - name_size / 2, 0),
+            style::Print(player2),
+        )?;
+        Ok(())
     }
 
     fn draw_board(&self) -> Result<(), Box<dyn Error>> {
         let (w, h) = terminal::size()?;
-        let mut stdout = self.data.stdout.lock().unwrap();
-        line(&mut *stdout, w)?;
-        let top = 0;
+        let top = 1;
         let bottom = h - 2;
+        let mut stdout = self.data.stdout.lock().unwrap();
 
+        self.draw_status(&mut stdout, START_LIVES, START_LIVES)?;
+
+        // top border
+        queue!(stdout, cursor::MoveTo(0, top))?;
+        line(&mut *stdout, w)?;
+
+        // side borders
         for i in top + 1..bottom {
             queue!(
                 stdout,
@@ -171,6 +300,8 @@ impl Game {
                 style::Print("|"),
             )?;
         }
+
+        // bottom border
         queue!(stdout, cursor::MoveTo(0, bottom))?;
         line(&mut *stdout, w)?;
 
@@ -194,38 +325,6 @@ impl Game {
     }
 }
 
-fn draw_loop(data: Arc<GameData>) {
-    let mut move_players = true;
-    loop {
-        let mut stdout = data.stdout.lock().unwrap();
-        let mut p_lock = data.players.lock().unwrap();
-        if move_players {
-            animate(&mut stdout, &mut p_lock.0, "1", data.w, data.h);
-            animate(&mut stdout, &mut p_lock.1, "2", data.w, data.h);
-        }
-        for m in data.missiles.lock().unwrap().iter_mut() {
-            animate(&mut stdout, m, "*", data.w, data.h);
-            if m.pos.hit(p_lock.0.pos) {
-                queue!(stdout, style::Print("BOOM"));
-            }
-            if m.pos.hit(p_lock.1.pos) {
-                queue!(stdout, style::Print("BOOM"));
-            }
-
-            // TODO: move draw_loop to main loop
-            // move keyboard to thread
-            // main loop checks a sync bool every loop
-            // keyboard 'q' sets the bool to mark we should exit
-            // change 'q' key to Esc because q too close to player 1 keys
-        }
-        stdout.flush().unwrap();
-        drop(p_lock);
-        drop(stdout);
-        move_players = !move_players;
-        thread::sleep(time::Duration::from_millis(30));
-    }
-}
-
 fn animate(stdout: &mut Stdout, p: &mut Character, s: &str, w: u16, h: u16) {
     queue!(stdout, cursor::MoveTo(p.pos.x, p.pos.y), style::Print(" "),).unwrap();
     p.pos.mov(p.dir);
@@ -236,21 +335,7 @@ fn animate(stdout: &mut Stdout, p: &mut Character, s: &str, w: u16, h: u16) {
 }
 
 fn is_on_board(c: &Character, w: u16, h: u16) -> bool {
-    1 <= c.pos.x && c.pos.x < w - 1 && 1 <= c.pos.y && c.pos.y < h - 2
-}
-
-impl Drop for Game {
-    fn drop(&mut self) {
-        let mut sl = self.data.stdout.lock().unwrap();
-        execute!(
-            sl,
-            terminal::Clear(terminal::ClearType::All),
-            cursor::MoveTo(0, self.data.h - 1),
-            cursor::Show
-        )
-        .unwrap();
-        terminal::disable_raw_mode().unwrap();
-    }
+    1 <= c.pos.x && c.pos.x < w - 1 && 2 <= c.pos.y && c.pos.y < h - 2
 }
 
 fn line<T: Write>(writer: &mut T, width: u16) -> Result<(), crossterm::ErrorKind> {
