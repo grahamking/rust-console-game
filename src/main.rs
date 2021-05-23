@@ -1,6 +1,10 @@
 use crossterm::event::KeyCode;
 use crossterm::{cursor, event, execute, queue, style, terminal}; // QueueableCommand};
+use log::debug;
+use simplelog::{Config, LevelFilter, WriteLogger};
 use std::error::Error;
+use std::fmt::{Display, Formatter};
+use std::fs::File;
 use std::io::{stdout, Stdout, Write};
 use std::sync::MutexGuard;
 use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc, Mutex};
@@ -9,15 +13,28 @@ use std::{thread, time::Duration};
 const FRAME_GAP_MS: u64 = 40;
 const START_LIVES: usize = 5;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum Dir {
+    None,
     Up,
     Down,
     Left,
     Right,
 }
 
-#[derive(Copy, Clone)]
+impl Display for Dir {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match *self {
+            Dir::None => write!(f, "None"),
+            Dir::Up => write!(f, "Up"),
+            Dir::Down => write!(f, "Down"),
+            Dir::Left => write!(f, "Left"),
+            Dir::Right => write!(f, "Right"),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 struct Pos {
     x: u16,
     y: u16,
@@ -37,6 +54,7 @@ impl Pos {
                 }
             }
             Dir::Right => self.x += 1,
+            Dir::None => (),
         }
     }
     fn reverse(&mut self, dir: Dir) -> Dir {
@@ -45,6 +63,7 @@ impl Pos {
             Dir::Down => Dir::Up,
             Dir::Left => Dir::Right,
             Dir::Right => Dir::Left,
+            Dir::None => Dir::None,
         };
         self.mov(new_dir);
         new_dir
@@ -54,15 +73,15 @@ impl Pos {
     }
 }
 
-struct Character {
+struct Player {
     name: String,
     pos: Pos,
     dir: Dir,
     lives: usize,
 }
-impl Character {
-    fn new(name: String, x: u16, y: u16, dir: Dir) -> Character {
-        Character {
+impl Player {
+    fn new(name: String, x: u16, y: u16, dir: Dir) -> Player {
+        Player {
             pos: Pos { x, y },
             name,
             dir,
@@ -71,17 +90,20 @@ impl Character {
     }
 }
 
+struct Missile {
+    pos: Pos,
+    dir: Dir,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
+    WriteLogger::init(
+        LevelFilter::Trace,
+        Config::default(),
+        File::create("console.log").unwrap(),
+    )?;
+
     let g = Game::new()?;
-    let winner = g.main_loop();
-    match winner {
-        Ok(None) => Ok(()),
-        Ok(Some(winner)) => {
-            println!("\n{} WINS !!\n", winner);
-            Ok(())
-        }
-        Err(e) => Err(e),
-    }
+    g.main_loop()
 }
 
 struct Game {
@@ -92,29 +114,31 @@ struct GameData {
     w: u16,
     h: u16,
     stdout: Mutex<Stdout>,
-    players: Mutex<(Character, Character)>,
-    missiles: Mutex<Vec<Character>>,
+    players: Mutex<(Player, Player)>,
+    missiles: Mutex<Vec<Missile>>,
     is_running: AtomicBool,
     winner: Mutex<Option<String>>,
+    hit: Mutex<Option<String>>,
 }
 
 impl Game {
     fn new() -> Result<Arc<Game>, Box<dyn Error>> {
         let (w, h) = terminal::size()?;
-        let quarter = w / 4;
         let gd = GameData {
             w,
             h,
             stdout: Mutex::new(stdout()),
             players: Mutex::new((
-                Character::new("Player One".to_string(), quarter, h / 2, Dir::Right),
-                Character::new("Player Two".to_string(), quarter * 3, h / 2, Dir::Left),
+                Player::new("Player One".to_string(), 0, 0, Dir::None),
+                Player::new("Player Two".to_string(), 0, 0, Dir::None),
             )),
             missiles: Mutex::new(Vec::new()),
             is_running: AtomicBool::new(true),
             winner: Mutex::new(None),
+            hit: Mutex::new(None),
         };
         let g = Arc::new(Game { data: gd });
+        g.set_start_positions();
 
         terminal::enable_raw_mode()?;
         queue!(
@@ -132,24 +156,32 @@ impl Game {
         Ok(g)
     }
 
-    // Returns the player who won, or None if quit from keyboard
-    fn main_loop(&self) -> Result<Option<String>, Box<dyn Error>> {
+    fn main_loop(&self) -> Result<(), Box<dyn Error>> {
         let mut move_players = true;
 
         while self.data.is_running.load(Ordering::Relaxed) {
-            if self.draw_frame(move_players) {
+            let (is_end, is_reset) = self.draw_frame(move_players);
+            if is_end {
                 break;
+            }
+            if is_reset {
+                let mut hit = self.data.hit.lock().unwrap();
+                self.draw_center_text(&format!("{} HIT !", hit.as_ref().unwrap()));
+                thread::sleep(Duration::from_secs(1));
+                *hit = None;
+                self.reset_board()?;
             }
             move_players = !move_players;
             thread::sleep(Duration::from_millis(FRAME_GAP_MS));
         }
         self.data.is_running.store(false, Ordering::Relaxed);
-        // wait for input_loop to exit
-        thread::sleep(Duration::from_millis(FRAME_GAP_MS + 5));
+
+        let winner = self.data.winner.lock().unwrap().take().unwrap();
+        self.draw_center_text(&format!("{} WINS !", winner));
+        thread::sleep(Duration::from_secs(2));
 
         self.cleanup();
-
-        Ok(self.data.winner.lock().unwrap().take())
+        Ok(())
     }
 
     fn cleanup(&self) {
@@ -194,7 +226,9 @@ impl Game {
             KeyCode::Char('d') => self.data.players.lock().unwrap().0.dir = Dir::Right,
             KeyCode::Tab => {
                 let p = &self.data.players.lock().unwrap().0;
-                self.fire(p.pos, p.dir);
+                if p.dir != Dir::None {
+                    self.fire(p.pos, p.dir);
+                }
             }
 
             // player two keys
@@ -204,57 +238,61 @@ impl Game {
             KeyCode::Right => self.data.players.lock().unwrap().1.dir = Dir::Right,
             KeyCode::Char('m') => {
                 let p = &self.data.players.lock().unwrap().1;
-                self.fire(p.pos, p.dir);
+                if p.dir != Dir::None {
+                    self.fire(p.pos, p.dir);
+                }
             }
             _ => (),
         }
         Ok(())
     }
 
-    fn draw_frame(&self, move_players: bool) -> bool {
-        let mut is_end = false;
+    fn draw_frame(&self, move_players: bool) -> (bool, bool) {
+        let (mut is_end, mut is_reset) = (false, false);
         let data = &self.data;
         let mut stdout = data.stdout.lock().unwrap();
         let mut p_lock = data.players.lock().unwrap();
-        for m in data.missiles.lock().unwrap().iter_mut() {
-            animate(&mut stdout, m, "*", data.w, data.h);
+        let mut missiles = data.missiles.lock().unwrap();
+        for m in missiles.iter_mut() {
+            animate_missile(&mut stdout, m, "*", data.w, data.h);
             if m.pos.hit(p_lock.0.pos) {
-                queue!(stdout, style::Print("BOOM")).unwrap();
                 p_lock.0.lives -= 1;
                 if p_lock.0.lives == 0 {
                     is_end = true;
                     *data.winner.lock().unwrap() = Some(p_lock.1.name.clone());
                     break;
                 }
-                self.draw_status(&mut stdout, p_lock.0.lives, p_lock.1.lives)
-                    .unwrap();
+                *data.hit.lock().unwrap() = Some(p_lock.0.name.clone());
+                is_reset = true;
+                break;
             }
             if m.pos.hit(p_lock.1.pos) {
-                queue!(stdout, style::Print("BOOM")).unwrap();
                 p_lock.1.lives -= 1;
                 if p_lock.1.lives == 0 {
                     is_end = true;
                     *data.winner.lock().unwrap() = Some(p_lock.0.name.clone());
                     break;
                 }
-                self.draw_status(&mut stdout, p_lock.0.lives, p_lock.1.lives)
-                    .unwrap();
+                *data.hit.lock().unwrap() = Some(p_lock.1.name.clone());
+                is_reset = true;
+                break;
             }
         }
-        if move_players {
-            animate(&mut stdout, &mut p_lock.0, "1", data.w, data.h);
-            animate(&mut stdout, &mut p_lock.1, "2", data.w, data.h);
+        missiles.retain(|m| m.dir != Dir::None);
+
+        if move_players && !is_end && !is_reset {
+            animate_player(&mut stdout, &mut p_lock.0, "1", data.w, data.h);
+            animate_player(&mut stdout, &mut p_lock.1, "2", data.w, data.h);
         }
         stdout.flush().unwrap();
-        is_end
+
+        (is_end, is_reset)
     }
 
     fn fire(&self, start_pos: Pos, dir: Dir) {
-        self.data.missiles.lock().unwrap().push(Character {
-            name: "missile".to_string(),
+        self.data.missiles.lock().unwrap().push(Missile {
             pos: start_pos,
             dir,
-            lives: 0,
         });
     }
 
@@ -265,17 +303,44 @@ impl Game {
         p2: usize,
     ) -> Result<(), Box<dyn Error>> {
         let third_width = self.data.w / 3;
-        let name_size = "Player X: ".len() as u16 + START_LIVES as u16;
-        let player1 = "Player 1: ".to_string() + &"#".repeat(p1) + &" ".repeat(START_LIVES - p1);
-        let player2 = "Player 2: ".to_string() + &"#".repeat(p2) + &" ".repeat(START_LIVES - p2);
+        let player1 = format!("Player 1: {} / {}", p1, START_LIVES);
+        let player2 = format!("Player 2: {} / {}", p2, START_LIVES);
         queue!(
             stdout,
-            cursor::MoveTo(third_width - name_size / 2, 0),
+            cursor::MoveTo(third_width - player1.len() as u16 / 2, 0),
             style::Print(player1),
-            cursor::MoveTo(2 * third_width - name_size / 2, 0),
+            cursor::MoveTo(2 * third_width - player2.len() as u16 / 2, 0),
             style::Print(player2),
         )?;
         Ok(())
+    }
+
+    fn set_start_positions(&self) {
+        let (w, h) = (self.data.w, self.data.h);
+        let quarter = w / 4;
+        let mut p_lock = self.data.players.lock().unwrap();
+
+        p_lock.0.dir = Dir::None;
+        p_lock.0.pos = Pos {
+            x: quarter,
+            y: h / 2,
+        };
+
+        p_lock.1.dir = Dir::None;
+        p_lock.1.pos = Pos {
+            x: quarter * 3,
+            y: h / 2,
+        };
+    }
+
+    fn reset_board(&self) -> Result<(), Box<dyn Error>> {
+        {
+            let mut stdout = self.data.stdout.lock().unwrap();
+            queue!(stdout, terminal::Clear(terminal::ClearType::All))?;
+        }
+        self.data.missiles.lock().unwrap().clear();
+        self.set_start_positions();
+        self.draw_board()
     }
 
     fn draw_board(&self) -> Result<(), Box<dyn Error>> {
@@ -283,8 +348,9 @@ impl Game {
         let top = 1;
         let bottom = h - 2;
         let mut stdout = self.data.stdout.lock().unwrap();
+        let players = self.data.players.lock().unwrap();
 
-        self.draw_status(&mut stdout, START_LIVES, START_LIVES)?;
+        self.draw_status(&mut stdout, players.0.lives, players.1.lives)?;
 
         // top border
         queue!(stdout, cursor::MoveTo(0, top))?;
@@ -306,7 +372,6 @@ impl Game {
         line(&mut *stdout, w)?;
 
         // player start positions
-        let players = self.data.players.lock().unwrap();
         queue!(
             stdout,
             cursor::MoveTo(players.0.pos.x, players.0.pos.y),
@@ -323,19 +388,60 @@ impl Game {
         stdout.flush()?;
         Ok(())
     }
-}
 
-fn animate(stdout: &mut Stdout, p: &mut Character, s: &str, w: u16, h: u16) {
-    queue!(stdout, cursor::MoveTo(p.pos.x, p.pos.y), style::Print(" "),).unwrap();
-    p.pos.mov(p.dir);
-    if !is_on_board(p, w, h) {
-        p.dir = p.pos.reverse(p.dir);
+    fn draw_center_text(&self, s: &str) {
+        let mut stdout = self.data.stdout.lock().unwrap();
+        queue!(
+            stdout,
+            terminal::Clear(terminal::ClearType::All),
+            cursor::MoveTo(self.data.w / 2 - s.len() as u16 / 2, self.data.h / 2),
+            style::Print(s)
+        )
+        .unwrap();
+        stdout.flush().unwrap();
     }
-    queue!(stdout, cursor::MoveTo(p.pos.x, p.pos.y), style::Print(s),).unwrap();
 }
 
-fn is_on_board(c: &Character, w: u16, h: u16) -> bool {
-    1 <= c.pos.x && c.pos.x < w - 1 && 2 <= c.pos.y && c.pos.y < h - 2
+fn animate_player(stdout: &mut Stdout, p: &mut Player, s: &str, w: u16, h: u16) {
+    let (prev_x, prev_y) = (p.pos.x, p.pos.y);
+    p.pos.mov(p.dir);
+    if is_on_board(p.pos.x, p.pos.y, w, h) {
+        queue!(
+            stdout,
+            cursor::MoveTo(prev_x, prev_y),
+            style::Print(" "),
+            cursor::MoveTo(p.pos.x, p.pos.y),
+            style::Print(s)
+        )
+        .unwrap();
+    } else {
+        debug!(
+            "{} reverse before. {}, {}, {}",
+            p.name, p.pos.x, p.pos.y, p.dir
+        );
+        // we're off the board, move back on
+        p.dir = p.pos.reverse(p.dir);
+        debug!(
+            "{} reverse after. {}, {}, {}",
+            p.name, p.pos.x, p.pos.y, p.dir
+        );
+    }
+}
+
+fn animate_missile(stdout: &mut Stdout, m: &mut Missile, s: &str, w: u16, h: u16) {
+    let (prev_x, prev_y) = (m.pos.x, m.pos.y);
+    queue!(stdout, cursor::MoveTo(prev_x, prev_y), style::Print(" ")).unwrap();
+    m.pos.mov(m.dir);
+    if is_on_board(m.pos.x, m.pos.y, w, h) {
+        queue!(stdout, cursor::MoveTo(m.pos.x, m.pos.y), style::Print(s)).unwrap();
+    } else {
+        m.pos.reverse(m.dir);
+        m.dir = Dir::None;
+    }
+}
+
+fn is_on_board(cx: u16, cy: u16, w: u16, h: u16) -> bool {
+    1 <= cx && cx < w - 1 && 2 <= cy && cy < h - 2
 }
 
 fn line<T: Write>(writer: &mut T, width: u16) -> Result<(), crossterm::ErrorKind> {
