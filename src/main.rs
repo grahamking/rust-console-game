@@ -131,10 +131,10 @@ impl Missile {
             return v;
         }
         let pos = self.pos.unwrap();
-        let left = pos.x - 2;
-        let top = pos.y - 2;
-        for x in left..=left + 5 {
-            for y in top..=top + 5 {
+        let left = if pos.x >= 2 { pos.x - 2 } else { 0 };
+        let top = if pos.y >= 2 { pos.y - 2 } else { 0 };
+        for x in left..=pos.x + 2 {
+            for y in top..=pos.y + 2 {
                 if is_on_board(x, y, self.w, self.h) {
                     v.push(Pos { x, y });
                 }
