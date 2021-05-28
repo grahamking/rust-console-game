@@ -1,9 +1,9 @@
 //use log::debug;
-//use simplelog::{Config, LevelFilter, WriteLogger};
+use simplelog::{Config, LevelFilter, WriteLogger};
 use std::error::Error;
+use std::fs::File;
 use std::thread;
 use std::time::Duration;
-//use std::fs::File;
 
 // All modules have to be declared here so that they can see each other
 mod console;
@@ -14,8 +14,11 @@ use dir::Dir;
 mod input;
 use input::InputEvent;
 
+const DEBUG: bool = false;
+
 const FRAME_GAP_MS: u64 = 40;
 const BANNER_PAUSE_S: u64 = 1;
+const EXPLODE_FRAMES: u16 = 4;
 
 trait Output {
     // Setup graphics
@@ -41,25 +44,49 @@ trait Output {
 }
 
 struct Missile {
+    w: u16, // board width
+    h: u16, // board height
     prev: Pos,
     pos: Option<Pos>,
     dir: Dir,
+    range: i16,
+    explode_timer: Option<u16>,
+    //explosion_pos: Option<Vec<Pos>>,
 }
 
 impl Missile {
     fn update(&mut self, w: u16, h: u16) {
-        let mut p = match self.pos {
-            Some(p) => p,
-            None => {
-                return;
-            }
-        };
+        if self.pos.is_none() {
+            return;
+        }
+        if self.explode_timer.is_some() {
+            self.update_explosion();
+        } else {
+            self.update_movement(w, h);
+        }
+    }
+
+    fn update_movement(&mut self, w: u16, h: u16) {
+        let mut p = self.pos.unwrap();
         self.prev = p;
         p = p.moved(self.dir).moved(self.dir); // move twice as fast as player
         if is_on_board(p.x, p.y, w, h) {
             self.pos = Some(p);
         } else {
             self.pos = None;
+        }
+        self.range -= 2;
+
+        // trigger explosion
+        if self.range <= 0 && !self.is_exploding() {
+            self.explode_timer = Some(EXPLODE_FRAMES);
+        }
+    }
+
+    fn update_explosion(&mut self) {
+        *self.explode_timer.as_mut().unwrap() -= 1;
+        if self.explode_timer.unwrap() == 0 {
+            self.pos = None; // mark for deletion
         }
     }
 
@@ -75,7 +102,45 @@ impl Missile {
                 }
             }
         }
+        if self.is_exploding() {
+            for pos in self.explosion() {
+                if pos.hit(p.pos) {
+                    return true;
+                }
+            }
+        }
         false
+    }
+
+    // Keep this missile on the board?
+    fn is_alive(&self) -> bool {
+        self.pos.is_some() && (self.range > 0 || self.is_exploding())
+    }
+
+    fn is_exploding(&self) -> bool {
+        self.explode_timer.is_some()
+    }
+
+    // The positions affected by an explosion of this missile
+    fn explosion(&self) -> Vec<crate::Pos> {
+        //if self.explosion_pos.is_some() {
+        //   return self.explosion_pos.as_ref().unwrap();
+        //}
+        let mut v = Vec::new(); // todo cache it
+        if self.pos.is_none() {
+            return v;
+        }
+        let pos = self.pos.unwrap();
+        let left = pos.x - 2;
+        let top = pos.y - 2;
+        for x in left..=left + 5 {
+            for y in top..=top + 5 {
+                if is_on_board(x, y, self.w, self.h) {
+                    v.push(Pos { x, y });
+                }
+            }
+        }
+        v
     }
 }
 
@@ -138,6 +203,14 @@ impl Pos {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    if DEBUG {
+        WriteLogger::init(
+            LevelFilter::Trace,
+            Config::default(),
+            File::create("hashbang.log").unwrap(),
+        )?;
+    }
+
     let mut out = console::new();
     out.init()?;
 
@@ -158,9 +231,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let winner = if p1.lives == 0 { p2.name } else { p1.name };
-    out.banner(&[&format!("{} wins!", winner)])?;
-    thread::sleep(Duration::from_secs(2));
+    let winner = if p1.lives == 0 {
+        Some(p2.name)
+    } else if p2.lives == 0 {
+        Some(p1.name)
+    } else {
+        None
+    };
+    if winner.is_some() {
+        out.banner(&[&format!("{} wins!", winner.unwrap())])?;
+        thread::sleep(Duration::from_secs(2));
+    }
 
     out.cleanup()?;
 
@@ -177,6 +258,7 @@ fn game_loop(
 ) -> Result<bool, Box<dyn Error>> {
     to_start_positions(p1, p2, w, h);
     out.start(&p1, &p2)?;
+    let missile_range: i16 = w as i16 / 4;
 
     let mut missiles: Vec<Missile> = Vec::new();
 
@@ -208,8 +290,12 @@ fn game_loop(
                     }
 
                     missiles.push(Missile {
+                        w,
+                        h,
                         prev: pos,
                         pos: Some(pos),
+                        range: missile_range,
+                        explode_timer: None,
                         dir,
                     });
                 }
@@ -245,7 +331,7 @@ fn game_loop(
 
         out.render(&p1, &p2, &missiles)?;
 
-        missiles.retain(|m| m.pos.is_some());
+        missiles.retain(|m| m.is_alive());
 
         thread::sleep(Duration::from_millis(FRAME_GAP_MS));
     }

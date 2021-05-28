@@ -11,6 +11,7 @@ pub struct ConsoleOutput {
     prev_p1: crate::Pos,
     prev_p2: crate::Pos,
     writer: Stdout,
+    to_clear: Vec<crate::Pos>,
 }
 
 pub fn new() -> ConsoleOutput {
@@ -21,6 +22,7 @@ pub fn new() -> ConsoleOutput {
         prev_p1: crate::Pos { x: 10, y: 10 }, // the 10/10 are never used
         prev_p2: crate::Pos { x: 10, y: 10 },
         writer: stdout(),
+        to_clear: Vec::new(),
     }
 }
 
@@ -110,26 +112,44 @@ impl crate::Output for ConsoleOutput {
         missiles: &[crate::Missile],
     ) -> Result<(), Box<dyn Error>> {
         let (prev1, prev2) = (self.prev_p1, self.prev_p2);
+
+        // clear previous things
         queue!(
             self.writer,
             cursor::MoveTo(prev1.x, prev1.y),
             style::Print(" "),
             cursor::MoveTo(prev2.x, prev2.y),
             style::Print(" "),
+        )?;
+        for p in self.to_clear.iter() {
+            queue!(self.writer, cursor::MoveTo(p.x, p.y), style::Print(" "),)?;
+        }
+        self.to_clear.clear();
+
+        // draw players
+        queue!(
+            self.writer,
             cursor::MoveTo(p1.pos.x, p1.pos.y),
             style::Print("1"),
             cursor::MoveTo(p2.pos.x, p2.pos.y),
             style::Print("2"),
         )?;
 
+        // draw missiles
         for m in missiles {
             queue!(
                 self.writer,
                 cursor::MoveTo(m.prev.x, m.prev.y),
                 style::Print(" "),
             )?;
-            if let Some(p) = m.pos {
-                queue!(self.writer, cursor::MoveTo(p.x, p.y), style::Print("*"),)?;
+            if m.is_exploding() {
+                for ep in m.explosion() {
+                    queue!(self.writer, cursor::MoveTo(ep.x, ep.y), style::Print("#"))?;
+                    self.to_clear.push(ep);
+                }
+            } else if m.is_alive() {
+                let p = m.pos.unwrap();
+                queue!(self.writer, cursor::MoveTo(p.x, p.y), style::Print("*"))?;
             }
         }
         self.writer.flush()?;
