@@ -7,7 +7,7 @@ pub struct Entity {
     pub pos: crate::Pos,
     pub lives: Option<usize>,
     pub prev: crate::Pos,
-    pub src: Option<u16>, // entity id that created this
+    pub color_idx: usize, // indexes console.rs:COLORS, or equivalent in other output
 
     is_fast: bool,
     is_bounce: bool,
@@ -20,10 +20,11 @@ pub struct Entity {
     explode_timer: Option<u16>,
 }
 
-pub fn new_player(name: &str, w: u16, h: u16) -> Entity {
+pub fn new_player(name: &str, color_idx: usize, w: u16, h: u16) -> Entity {
     Entity {
         w,
         h,
+        color_idx,
         name: Some(name.to_string()),
         prev: crate::Pos { x: 0, y: 0 },
         pos: crate::Pos { x: 0, y: 0 },
@@ -36,7 +37,6 @@ pub fn new_player(name: &str, w: u16, h: u16) -> Entity {
         is_explodable: false,
         range: None,
         explode_timer: None,
-        src: None,
     }
 }
 
@@ -44,7 +44,7 @@ pub fn new_missile(
     start_pos: crate::Pos,
     dir: crate::Dir,
     range: i16,
-    src_entity_id: u16,
+    color_idx: usize,
     w: u16,
     h: u16,
 ) -> Entity {
@@ -52,6 +52,7 @@ pub fn new_missile(
         w,
         h,
         dir,
+        color_idx,
         prev: start_pos,
         pos: start_pos,
         is_alive: true,
@@ -60,7 +61,6 @@ pub fn new_missile(
         range: Some(range),
         explode_timer: None,
         is_explodable: true,
-        src: Some(src_entity_id),
 
         name: None,
         lives: None,

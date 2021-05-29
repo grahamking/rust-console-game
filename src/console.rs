@@ -4,8 +4,11 @@ use std::io::{stdout, Stdout, Write};
 
 const START_LIVES: usize = 5;
 const TITLE: &str = "Hash Bang";
-const P1_COLOR: style::Color = style::Color::Yellow;
-const P2_COLOR: style::Color = style::Color::Cyan;
+
+lazy_static! {
+    static ref COLORS: Vec<style::Color> =
+        vec![style::Color::Grey, style::Color::Yellow, style::Color::Cyan,];
+}
 
 pub struct ConsoleOutput {
     w: u16,
@@ -66,10 +69,10 @@ impl ConsoleOutput {
         queue!(
             self.writer,
             cursor::MoveTo(third_width - player1.len() as u16 / 2, 0),
-            style::SetForegroundColor(P1_COLOR),
+            style::SetForegroundColor(COLORS[1]),
             style::Print(player1),
             cursor::MoveTo(2 * third_width - player2.len() as u16 / 2, 0),
-            style::SetForegroundColor(P2_COLOR),
+            style::SetForegroundColor(COLORS[2]),
             style::Print(player2),
             style::ResetColor,
         )?;
@@ -124,10 +127,10 @@ impl crate::Output for ConsoleOutput {
             self.writer,
             cursor::MoveTo(p1.pos.x, p1.pos.y),
             style::SetAttribute(style::Attribute::Bold),
-            style::SetForegroundColor(P1_COLOR),
+            style::SetForegroundColor(COLORS[1]),
             style::Print("1"),
             cursor::MoveTo(p2.pos.x, p2.pos.y),
-            style::SetForegroundColor(P2_COLOR),
+            style::SetForegroundColor(COLORS[2]),
             style::Print("2"),
             style::SetAttribute(style::Attribute::Reset),
             style::ResetColor,
@@ -140,11 +143,7 @@ impl crate::Output for ConsoleOutput {
                 cursor::MoveTo(m.prev.x, m.prev.y),
                 style::Print(" "),
             )?;
-            if *m.src.as_ref().unwrap() == 1 {
-                queue!(self.writer, style::SetForegroundColor(P1_COLOR))?;
-            } else {
-                queue!(self.writer, style::SetForegroundColor(P2_COLOR))?;
-            }
+            queue!(self.writer, style::SetForegroundColor(COLORS[m.color_idx]))?;
             if m.is_exploding() {
                 for ep in m.explosion() {
                     queue!(self.writer, cursor::MoveTo(ep.x, ep.y), style::Print("#"))?;

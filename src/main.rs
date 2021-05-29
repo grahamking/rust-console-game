@@ -5,7 +5,8 @@ use std::fs::File;
 use std::thread;
 use std::time::Duration;
 
-// All modules have to be declared here so that they can see each other
+#[macro_use]
+extern crate lazy_static;
 
 mod console;
 
@@ -90,8 +91,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     out.init()?;
 
     let (w, h) = out.dimensions()?;
-    let mut p1 = entity::new_player("Player 1", w, h);
-    let mut p2 = entity::new_player("Player 2", w, h);
+    let mut p1 = entity::new_player("Player 1", 1, w, h);
+    let mut p2 = entity::new_player("Player 2", 2, w, h);
     out.banner(&[
         "Player 1   Move: w a s d, Fire: Tab ",
         "Player 2   Move: Arrow keys. Fire: m",
@@ -149,11 +150,12 @@ fn game_loop(
                 InputEvent::Move { player_id, dir } if *player_id == 1 => p1.dir = *dir,
                 InputEvent::Move { player_id, dir } if *player_id == 2 => p2.dir = *dir,
                 InputEvent::Fire { player_id } => {
-                    let (mut pos, dir) = match player_id {
-                        1 => (p1.pos, p1.dir),
-                        2 => (p2.pos, p2.dir),
+                    let p = match player_id {
+                        1 => &p1,
+                        2 => &p2,
                         _ => panic!("impossible player id"),
                     };
+                    let (mut pos, dir) = (p.pos, p.dir);
                     if dir == Dir::None {
                         continue; // can't fire when not moving
                     }
@@ -168,7 +170,7 @@ fn game_loop(
                         pos,
                         dir,
                         missile_range,
-                        *player_id as u16,
+                        p.color_idx,
                         w,
                         h,
                     ));
