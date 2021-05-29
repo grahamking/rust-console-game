@@ -8,8 +8,11 @@ pub struct Entity {
     pub lives: Option<usize>,
     pub prev: crate::Pos,
     pub color_idx: usize, // indexes console.rs:COLORS, or equivalent in other output
+    pub texture_vertical: String, // actually just the char to print, but sounds fancy
+    pub texture_horizontal: String,
+    pub texture_explosion: Option<String>,
+    pub speed: u16,
 
-    is_fast: bool,
     is_bounce: bool,
     is_explodable: bool,
 
@@ -20,11 +23,13 @@ pub struct Entity {
     explode_timer: Option<u16>,
 }
 
-pub fn new_player(name: &str, color_idx: usize, w: u16, h: u16) -> Entity {
+pub fn new_player(name: &str, pchar: String, color_idx: usize, w: u16, h: u16) -> Entity {
     Entity {
         w,
         h,
         color_idx,
+        texture_vertical: pchar.clone(),
+        texture_horizontal: pchar,
         name: Some(name.to_string()),
         prev: crate::Pos { x: 0, y: 0 },
         pos: crate::Pos { x: 0, y: 0 },
@@ -33,10 +38,11 @@ pub fn new_player(name: &str, color_idx: usize, w: u16, h: u16) -> Entity {
         is_alive: true,
         is_bounce: true,
 
-        is_fast: false,
+        speed: 1,
         is_explodable: false,
         range: None,
         explode_timer: None,
+        texture_explosion: None,
     }
 }
 
@@ -53,15 +59,48 @@ pub fn new_missile(
         h,
         dir,
         color_idx,
+        texture_vertical: "*".to_string(),
+        texture_horizontal: "*".to_string(),
+        texture_explosion: Some("#".to_string()),
         prev: start_pos,
         pos: start_pos,
         is_alive: true,
-        is_fast: true,
+        speed: 2,
         is_bounce: false,
         range: Some(range),
         explode_timer: None,
         is_explodable: true,
 
+        name: None,
+        lives: None,
+    }
+}
+
+pub fn new_ray(
+    start_pos: crate::Pos,
+    dir: crate::Dir,
+    color_idx: usize,
+    range: u16,
+    w: u16,
+    h: u16,
+) -> Entity {
+    Entity {
+        w,
+        h,
+        dir,
+        color_idx,
+        texture_vertical: "|".to_string(),
+        texture_horizontal: "-".to_string(),
+        prev: start_pos,
+        pos: start_pos,
+        is_alive: true,
+        speed: range,
+        is_bounce: false,
+        range: Some(range as i16),
+
+        explode_timer: None,
+        texture_explosion: None,
+        is_explodable: false,
         name: None,
         lives: None,
     }
@@ -82,7 +121,7 @@ impl Entity {
     fn update_movement(&mut self) {
         let mut dist_moved = 1;
         let mut next_pos = self.pos.moved(self.dir);
-        if self.is_fast {
+        for _ in 1..self.speed {
             next_pos = next_pos.moved(self.dir);
             dist_moved += 1;
         }
@@ -113,12 +152,17 @@ impl Entity {
         if !self.is_alive {
             return false;
         }
-        if self.pos.does_hit(p.pos) {
+        let mut check_pos = self.pos;
+        if check_pos.does_hit(p.pos) {
             return true;
         }
-        // missiles move two squares per tick, so check both
-        if self.is_fast && self.pos.moved(self.dir.opposite()).does_hit(p.pos) {
-            return true;
+        // if we moved more than one square, check the other squares
+        let opposite = self.dir.opposite();
+        for _ in 1..self.speed {
+            check_pos = check_pos.moved(opposite);
+            if check_pos.does_hit(p.pos) {
+                return true;
+            }
         }
         if self.is_exploding() {
             for pos in self.explosion() {

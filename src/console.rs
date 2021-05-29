@@ -128,10 +128,10 @@ impl crate::Output for ConsoleOutput {
             cursor::MoveTo(p1.pos.x, p1.pos.y),
             style::SetAttribute(style::Attribute::Bold),
             style::SetForegroundColor(COLORS[1]),
-            style::Print("1"),
+            style::Print(&p1.texture_horizontal),
             cursor::MoveTo(p2.pos.x, p2.pos.y),
             style::SetForegroundColor(COLORS[2]),
-            style::Print("2"),
+            style::Print(&p2.texture_horizontal),
             style::SetAttribute(style::Attribute::Reset),
             style::ResetColor,
         )?;
@@ -146,15 +146,31 @@ impl crate::Output for ConsoleOutput {
             queue!(self.writer, style::SetForegroundColor(COLORS[m.color_idx]))?;
             if m.is_exploding() {
                 for ep in m.explosion() {
-                    queue!(self.writer, cursor::MoveTo(ep.x, ep.y), style::Print("#"))?;
+                    queue!(
+                        self.writer,
+                        cursor::MoveTo(ep.x, ep.y),
+                        style::Print(&m.texture_horizontal)
+                    )?;
                     self.to_clear.push(ep);
                 }
             } else if m.is_alive {
-                queue!(
-                    self.writer,
-                    cursor::MoveTo(m.pos.x, m.pos.y),
-                    style::Print("*")
-                )?;
+                let tx = if m.dir.is_vertical() {
+                    &m.texture_vertical
+                } else {
+                    &m.texture_horizontal
+                };
+                let opposite = m.dir.opposite();
+                let mut draw_pos = m.pos;
+                for _ in 0..m.speed {
+                    if crate::is_on_board(draw_pos.x, draw_pos.y, self.w, self.h) {
+                        queue!(
+                            self.writer,
+                            cursor::MoveTo(draw_pos.x, draw_pos.y),
+                            style::Print(tx),
+                        )?;
+                    }
+                    draw_pos = draw_pos.moved(opposite);
+                }
             }
             queue!(self.writer, style::ResetColor)?;
         }

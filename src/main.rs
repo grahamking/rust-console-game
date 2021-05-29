@@ -91,12 +91,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     out.init()?;
 
     let (w, h) = out.dimensions()?;
-    let mut p1 = entity::new_player("Player 1", 1, w, h);
-    let mut p2 = entity::new_player("Player 2", 2, w, h);
+    let mut p1 = entity::new_player("Player 1", "1".to_string(), 1, w, h);
+    let mut p2 = entity::new_player("Player 2", "2".to_string(), 2, w, h);
     out.banner(&[
         "Player 1   Move: w a s d.    Fire modifier: Shift",
         "Player 2   Move: Arrow keys. Fire modifier: Alt  ",
-        "Esc to quit                         ",
+        "Esc to quit                                      ",
         "Press any key to start",
     ])?;
 
@@ -149,10 +149,7 @@ fn game_loop(
                 }
                 InputEvent::Move { entity_id, dir } if *entity_id == 1 => p1.dir = *dir,
                 InputEvent::Move { entity_id, dir } if *entity_id == 2 => p2.dir = *dir,
-                InputEvent::Fire {
-                    entity_id,
-                    kind: _kind,
-                } => {
+                InputEvent::Fire { entity_id, kind } => {
                     let p = match entity_id {
                         1 => &p1,
                         2 => &p2,
@@ -169,14 +166,37 @@ fn game_loop(
                         continue;
                     }
 
-                    missiles.push(entity::new_missile(
-                        pos,
-                        dir,
-                        missile_range,
-                        p.color_idx,
-                        w,
-                        h,
-                    ));
+                    match kind {
+                        input::FireKind::Up => {
+                            missiles.push(entity::new_missile(
+                                pos,
+                                dir,
+                                missile_range,
+                                p.color_idx,
+                                w,
+                                h,
+                            ));
+                        }
+                        input::FireKind::Down => {
+                            let dist_to_edge = match dir {
+                                Dir::Left => pos.x - 1,
+                                Dir::Right => w - pos.x - 1,
+                                Dir::Up => pos.y - 1,
+                                Dir::Down => h - pos.y - 1,
+                                Dir::None => 0,
+                            };
+                            missiles.push(entity::new_ray(
+                                pos,
+                                dir,
+                                p.color_idx,
+                                dist_to_edge,
+                                w,
+                                h,
+                            ))
+                        }
+                        input::FireKind::Left => (),
+                        input::FireKind::Right => (),
+                    }
                 }
                 _ => panic!("entity_id not 1 or 2, shouldn't happen"),
             }

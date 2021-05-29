@@ -19,6 +19,12 @@ impl Dir {
             Dir::None => Dir::None,
         }
     }
+    pub fn is_vertical(&self) -> bool {
+        *self == Dir::Up || *self == Dir::Down
+    }
+    pub fn _is_horizontal(&self) -> bool {
+        *self == Dir::Left || *self == Dir::Right
+    }
 }
 
 impl Display for Dir {
