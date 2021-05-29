@@ -4,6 +4,8 @@ use std::io::{stdout, Stdout, Write};
 
 const START_LIVES: usize = 5;
 const TITLE: &str = "Hash Bang";
+const P1_COLOR: style::Color = style::Color::Yellow;
+const P2_COLOR: style::Color = style::Color::Cyan;
 
 pub struct ConsoleOutput {
     w: u16,
@@ -27,10 +29,10 @@ pub fn new() -> ConsoleOutput {
 }
 
 impl ConsoleOutput {
-    fn draw_board(&mut self, p1: &crate::Player, p2: &crate::Player) -> Result<(), Box<dyn Error>> {
+    fn draw_board(&mut self, p1_lives: usize, p2_lives: usize) -> Result<(), Box<dyn Error>> {
         let top = 1;
         let bottom = self.h - 2;
-        self.draw_status(p1.lives, p2.lives)?;
+        self.draw_status(p1_lives, p2_lives)?;
 
         let mut stdout = &self.writer;
 
@@ -53,18 +55,6 @@ impl ConsoleOutput {
         queue!(stdout, cursor::MoveTo(0, bottom))?;
         line(&mut stdout, self.w)?;
 
-        // player start positions
-        queue!(
-            stdout,
-            cursor::MoveTo(p1.pos.x, p1.pos.y),
-            style::Print("1")
-        )?;
-        queue!(
-            stdout,
-            cursor::MoveTo(p2.pos.x, p2.pos.y),
-            style::Print("2")
-        )?;
-
         stdout.flush()?;
         Ok(())
     }
@@ -76,9 +66,12 @@ impl ConsoleOutput {
         queue!(
             self.writer,
             cursor::MoveTo(third_width - player1.len() as u16 / 2, 0),
+            style::SetForegroundColor(P1_COLOR),
             style::Print(player1),
             cursor::MoveTo(2 * third_width - player2.len() as u16 / 2, 0),
+            style::SetForegroundColor(P2_COLOR),
             style::Print(player2),
+            style::ResetColor,
         )?;
         Ok(())
     }
@@ -97,9 +90,9 @@ impl crate::Output for ConsoleOutput {
         Ok(())
     }
 
-    fn start(&mut self, p1: &crate::Player, p2: &crate::Player) -> Result<(), Box<dyn Error>> {
+    fn start(&mut self, p1: &crate::Entity, p2: &crate::Entity) -> Result<(), Box<dyn Error>> {
         queue!(self.writer, terminal::Clear(terminal::ClearType::All))?;
-        self.draw_board(p1, p2)?;
+        self.draw_board(*p1.lives.as_ref().unwrap(), *p2.lives.as_ref().unwrap())?;
         self.prev_p1 = p1.pos;
         self.prev_p2 = p2.pos;
         Ok(())
@@ -107,9 +100,9 @@ impl crate::Output for ConsoleOutput {
 
     fn render(
         &mut self,
-        p1: &crate::Player,
-        p2: &crate::Player,
-        missiles: &[crate::Missile],
+        p1: &crate::Entity,
+        p2: &crate::Entity,
+        missiles: &[crate::Entity],
     ) -> Result<(), Box<dyn Error>> {
         let (prev1, prev2) = (self.prev_p1, self.prev_p2);
 
@@ -130,9 +123,14 @@ impl crate::Output for ConsoleOutput {
         queue!(
             self.writer,
             cursor::MoveTo(p1.pos.x, p1.pos.y),
+            style::SetAttribute(style::Attribute::Bold),
+            style::SetForegroundColor(P1_COLOR),
             style::Print("1"),
             cursor::MoveTo(p2.pos.x, p2.pos.y),
+            style::SetForegroundColor(P2_COLOR),
             style::Print("2"),
+            style::SetAttribute(style::Attribute::Reset),
+            style::ResetColor,
         )?;
 
         // draw missiles
@@ -142,15 +140,24 @@ impl crate::Output for ConsoleOutput {
                 cursor::MoveTo(m.prev.x, m.prev.y),
                 style::Print(" "),
             )?;
+            if *m.src.as_ref().unwrap() == 1 {
+                queue!(self.writer, style::SetForegroundColor(P1_COLOR))?;
+            } else {
+                queue!(self.writer, style::SetForegroundColor(P2_COLOR))?;
+            }
             if m.is_exploding() {
                 for ep in m.explosion() {
                     queue!(self.writer, cursor::MoveTo(ep.x, ep.y), style::Print("#"))?;
                     self.to_clear.push(ep);
                 }
-            } else if m.is_alive() {
-                let p = m.pos.unwrap();
-                queue!(self.writer, cursor::MoveTo(p.x, p.y), style::Print("*"))?;
+            } else if m.is_alive {
+                queue!(
+                    self.writer,
+                    cursor::MoveTo(m.pos.x, m.pos.y),
+                    style::Print("*")
+                )?;
             }
+            queue!(self.writer, style::ResetColor)?;
         }
         self.writer.flush()?;
 

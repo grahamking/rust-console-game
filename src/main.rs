@@ -6,6 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 // All modules have to be declared here so that they can see each other
+
 mod console;
 
 mod dir;
@@ -14,11 +15,13 @@ use dir::Dir;
 mod input;
 use input::InputEvent;
 
+mod entity;
+use entity::Entity;
+
 const DEBUG: bool = false;
 
 const FRAME_GAP_MS: u64 = 40;
 const BANNER_PAUSE_S: u64 = 1;
-const EXPLODE_FRAMES: u16 = 4;
 
 trait Output {
     // Setup graphics
@@ -28,10 +31,10 @@ trait Output {
     fn dimensions(&self) -> Result<(u16, u16), Box<dyn Error>>;
 
     // Render start positions
-    fn start(&mut self, p1: &Player, p2: &Player) -> Result<(), Box<dyn Error>>;
+    fn start(&mut self, p1: &Entity, p2: &Entity) -> Result<(), Box<dyn Error>>;
 
     // Update display, called every frame
-    fn render(&mut self, p1: &Player, p2: &Player, m: &[Missile]) -> Result<(), Box<dyn Error>>;
+    fn render(&mut self, p1: &Entity, p2: &Entity, m: &[Entity]) -> Result<(), Box<dyn Error>>;
 
     // Display a banner, possibly multi-line. Caller must reset screen afterwards.
     fn banner(&mut self, msg: &[&str]) -> Result<(), Box<dyn Error>>;
@@ -43,136 +46,8 @@ trait Output {
     fn cleanup(&mut self) -> Result<(), Box<dyn Error>>;
 }
 
-struct Missile {
-    w: u16, // board width
-    h: u16, // board height
-    prev: Pos,
-    pos: Option<Pos>,
-    dir: Dir,
-    range: i16,
-    explode_timer: Option<u16>,
-    //explosion_pos: Option<Vec<Pos>>,
-}
-
-impl Missile {
-    fn update(&mut self, w: u16, h: u16) {
-        if self.pos.is_none() {
-            return;
-        }
-        if self.explode_timer.is_some() {
-            self.update_explosion();
-        } else {
-            self.update_movement(w, h);
-        }
-    }
-
-    fn update_movement(&mut self, w: u16, h: u16) {
-        let mut p = self.pos.unwrap();
-        self.prev = p;
-        p = p.moved(self.dir).moved(self.dir); // move twice as fast as player
-        if is_on_board(p.x, p.y, w, h) {
-            self.pos = Some(p);
-        } else {
-            self.pos = None;
-        }
-        self.range -= 2;
-
-        // trigger explosion
-        if self.range <= 0 && !self.is_exploding() {
-            self.explode_timer = Some(EXPLODE_FRAMES);
-        }
-    }
-
-    fn update_explosion(&mut self) {
-        *self.explode_timer.as_mut().unwrap() -= 1;
-        if self.explode_timer.unwrap() == 0 {
-            self.pos = None; // mark for deletion
-        }
-    }
-
-    fn hit(&self, p: &Player) -> bool {
-        match self.pos {
-            None => {
-                return false;
-            }
-            Some(pos) => {
-                // missiles move two squares per tick, so check both
-                if pos.hit(p.pos) || pos.moved(self.dir.opposite()).hit(p.pos) {
-                    return true;
-                }
-            }
-        }
-        if self.is_exploding() {
-            for pos in self.explosion() {
-                if pos.hit(p.pos) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    // Keep this missile on the board?
-    fn is_alive(&self) -> bool {
-        self.pos.is_some() && (self.range > 0 || self.is_exploding())
-    }
-
-    fn is_exploding(&self) -> bool {
-        self.explode_timer.is_some()
-    }
-
-    // The positions affected by an explosion of this missile
-    fn explosion(&self) -> Vec<crate::Pos> {
-        //if self.explosion_pos.is_some() {
-        //   return self.explosion_pos.as_ref().unwrap();
-        //}
-        let mut v = Vec::new(); // todo cache it
-        if self.pos.is_none() {
-            return v;
-        }
-        let pos = self.pos.unwrap();
-        let left = if pos.x >= 2 { pos.x - 2 } else { 0 };
-        let top = if pos.y >= 2 { pos.y - 2 } else { 0 };
-        for x in left..=pos.x + 2 {
-            for y in top..=pos.y + 2 {
-                if is_on_board(x, y, self.w, self.h) {
-                    v.push(Pos { x, y });
-                }
-            }
-        }
-        v
-    }
-}
-
-struct Player {
-    name: String,
-    pos: Pos,
-    dir: Dir,
-    lives: usize,
-}
-impl Player {
-    fn new(name: &str) -> Player {
-        Player {
-            name: name.to_string(),
-            pos: Pos { x: 0, y: 0 },
-            dir: Dir::None,
-            lives: 5,
-        }
-    }
-
-    fn update(&mut self, w: u16, h: u16) {
-        let next_pos = self.pos.moved(self.dir);
-        if is_on_board(next_pos.x, next_pos.y, w, h) {
-            self.pos = next_pos;
-        } else {
-            // bounce back onto the board
-            self.dir = self.dir.opposite();
-        }
-    }
-}
-
 #[derive(Copy, Clone, Debug)]
-struct Pos {
+pub struct Pos {
     x: u16,
     y: u16,
 }
@@ -197,7 +72,7 @@ impl Pos {
         }
         Pos { x, y }
     }
-    fn hit(&self, pos: Pos) -> bool {
+    fn does_hit(&self, pos: Pos) -> bool {
         self.x == pos.x && self.y == pos.y
     }
 }
@@ -215,8 +90,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     out.init()?;
 
     let (w, h) = out.dimensions()?;
-    let mut p1 = Player::new("Player 1");
-    let mut p2 = Player::new("Player 2");
+    let mut p1 = entity::new_player("Player 1", w, h);
+    let mut p2 = entity::new_player("Player 2", w, h);
     out.banner(&[
         "Player 1   Move: w a s d, Fire: Tab ",
         "Player 2   Move: Arrow keys. Fire: m",
@@ -224,17 +99,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         "Press any key to start",
     ])?;
 
-    while p1.lives > 0 && p2.lives > 0 {
+    while p1.is_alive && p2.is_alive {
         input::wait_for_keypress();
         if game_loop(&mut out, &mut p1, &mut p2, w, h)? {
             break; // user pressed quit
         }
     }
 
-    let winner = if p1.lives == 0 {
-        Some(p2.name)
-    } else if p2.lives == 0 {
-        Some(p1.name)
+    let winner = if !p1.is_alive {
+        p2.name
+    } else if !p2.is_alive {
+        p1.name
     } else {
         None
     };
@@ -251,8 +126,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 // Returns Ok(true) when it's time to exit
 fn game_loop(
     out: &mut impl Output,
-    p1: &mut Player,
-    p2: &mut Player,
+    p1: &mut Entity,
+    p2: &mut Entity,
     w: u16,
     h: u16,
 ) -> Result<bool, Box<dyn Error>> {
@@ -260,7 +135,7 @@ fn game_loop(
     out.start(&p1, &p2)?;
     let missile_range: i16 = w as i16 / 4;
 
-    let mut missiles: Vec<Missile> = Vec::new();
+    let mut missiles: Vec<Entity> = Vec::new();
 
     let mut is_exit = false;
     let mut is_done = false;
@@ -289,15 +164,14 @@ fn game_loop(
                         continue;
                     }
 
-                    missiles.push(Missile {
+                    missiles.push(entity::new_missile(
+                        pos,
+                        dir,
+                        missile_range,
+                        *player_id as u16,
                         w,
                         h,
-                        prev: pos,
-                        pos: Some(pos),
-                        range: missile_range,
-                        explode_timer: None,
-                        dir,
-                    });
+                    ));
                 }
                 _ => panic!("player_id not 1 or 2, shouldn't happen"),
             }
@@ -306,19 +180,19 @@ fn game_loop(
             continue;
         }
 
-        p1.update(w, h);
-        p2.update(w, h);
+        p1.update();
+        p2.update();
         for m in missiles.iter_mut() {
-            m.update(w, h);
-            if m.hit(p1) {
-                p1.lives -= 1;
+            m.update();
+            if m.does_hit(p1) {
+                p1.hit();
                 out.banner(&["Player 1 is hit!", "Press any key to continue"])?;
                 thread::sleep(Duration::from_secs(BANNER_PAUSE_S));
                 is_done = true;
                 break;
             }
-            if m.hit(p2) {
-                p2.lives -= 1;
+            if m.does_hit(p2) {
+                p2.hit();
                 out.banner(&["Player 2 is hit!", "Press any key to continue"])?;
                 thread::sleep(Duration::from_secs(BANNER_PAUSE_S));
                 is_done = true;
@@ -331,7 +205,7 @@ fn game_loop(
 
         out.render(&p1, &p2, &missiles)?;
 
-        missiles.retain(|m| m.is_alive());
+        missiles.retain(|m| m.is_alive);
 
         thread::sleep(Duration::from_millis(FRAME_GAP_MS));
     }
@@ -339,7 +213,7 @@ fn game_loop(
     Ok(is_exit)
 }
 
-fn to_start_positions(p1: &mut Player, p2: &mut Player, display_width: u16, display_height: u16) {
+fn to_start_positions(p1: &mut Entity, p2: &mut Entity, display_width: u16, display_height: u16) {
     let (w, h) = (display_width, display_height);
     let quarter = w / 4;
 
