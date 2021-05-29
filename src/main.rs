@@ -94,8 +94,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut p1 = entity::new_player("Player 1", 1, w, h);
     let mut p2 = entity::new_player("Player 2", 2, w, h);
     out.banner(&[
-        "Player 1   Move: w a s d, Fire: Tab ",
-        "Player 2   Move: Arrow keys. Fire: m",
+        "Player 1   Move: w a s d.    Fire modifier: Shift",
+        "Player 2   Move: Arrow keys. Fire modifier: Alt  ",
         "Esc to quit                         ",
         "Press any key to start",
     ])?;
@@ -147,10 +147,13 @@ fn game_loop(
                     is_exit = true;
                     break;
                 }
-                InputEvent::Move { player_id, dir } if *player_id == 1 => p1.dir = *dir,
-                InputEvent::Move { player_id, dir } if *player_id == 2 => p2.dir = *dir,
-                InputEvent::Fire { player_id } => {
-                    let p = match player_id {
+                InputEvent::Move { entity_id, dir } if *entity_id == 1 => p1.dir = *dir,
+                InputEvent::Move { entity_id, dir } if *entity_id == 2 => p2.dir = *dir,
+                InputEvent::Fire {
+                    entity_id,
+                    kind: _kind,
+                } => {
+                    let p = match entity_id {
                         1 => &p1,
                         2 => &p2,
                         _ => panic!("impossible player id"),
@@ -175,7 +178,7 @@ fn game_loop(
                         h,
                     ));
                 }
-                _ => panic!("player_id not 1 or 2, shouldn't happen"),
+                _ => panic!("entity_id not 1 or 2, shouldn't happen"),
             }
         }
         if is_exit || is_done {
