@@ -1,8 +1,8 @@
 use crossterm::{cursor, execute, queue, style, terminal};
+//use log::debug;
 use std::error::Error;
 use std::io::{stdout, Stdout, Write};
 
-const START_LIVES: usize = 5;
 const TITLE: &str = "Hash Bang";
 
 lazy_static! {
@@ -13,10 +13,7 @@ lazy_static! {
 pub struct ConsoleOutput {
     w: u16,
     h: u16,
-    prev_p1: crate::Pos,
-    prev_p2: crate::Pos,
     writer: Stdout,
-    to_clear: Vec<crate::Pos>,
 }
 
 pub fn new() -> ConsoleOutput {
@@ -24,10 +21,7 @@ pub fn new() -> ConsoleOutput {
     ConsoleOutput {
         w,
         h,
-        prev_p1: crate::Pos { x: 10, y: 10 }, // the 10/10 are never used
-        prev_p2: crate::Pos { x: 10, y: 10 },
         writer: stdout(),
-        to_clear: Vec::new(),
     }
 }
 
@@ -64,8 +58,8 @@ impl ConsoleOutput {
 
     fn draw_status(&mut self, p1_lives: usize, p2_lives: usize) -> Result<(), Box<dyn Error>> {
         let third_width = self.w / 3;
-        let player1 = format!("Player 1: {} / {}", p1_lives, START_LIVES);
-        let player2 = format!("Player 2: {} / {}", p2_lives, START_LIVES);
+        let player1 = format!("Player 1: {} / {}", p1_lives, crate::PLAYER_LIVES);
+        let player2 = format!("Player 2: {} / {}", p2_lives, crate::PLAYER_LIVES);
         queue!(
             self.writer,
             cursor::MoveTo(third_width - player1.len() as u16 / 2, 0),
@@ -96,8 +90,6 @@ impl crate::Output for ConsoleOutput {
     fn start(&mut self, p1: &crate::Entity, p2: &crate::Entity) -> Result<(), Box<dyn Error>> {
         queue!(self.writer, terminal::Clear(terminal::ClearType::All))?;
         self.draw_board(*p1.lives.as_ref().unwrap(), *p2.lives.as_ref().unwrap())?;
-        self.prev_p1 = p1.pos;
-        self.prev_p2 = p2.pos;
         Ok(())
     }
 
@@ -107,20 +99,8 @@ impl crate::Output for ConsoleOutput {
         p2: &crate::Entity,
         missiles: &[crate::Entity],
     ) -> Result<(), Box<dyn Error>> {
-        let (prev1, prev2) = (self.prev_p1, self.prev_p2);
-
-        // clear previous things
-        queue!(
-            self.writer,
-            cursor::MoveTo(prev1.x, prev1.y),
-            style::Print(" "),
-            cursor::MoveTo(prev2.x, prev2.y),
-            style::Print(" "),
-        )?;
-        for p in self.to_clear.iter() {
-            queue!(self.writer, cursor::MoveTo(p.x, p.y), style::Print(" "),)?;
-        }
-        self.to_clear.clear();
+        queue!(self.writer, terminal::Clear(terminal::ClearType::All))?;
+        self.draw_board(p1.lives.unwrap(), p2.lives.unwrap())?;
 
         // draw players
         queue!(
@@ -138,11 +118,6 @@ impl crate::Output for ConsoleOutput {
 
         // draw missiles
         for m in missiles {
-            queue!(
-                self.writer,
-                cursor::MoveTo(m.prev.x, m.prev.y),
-                style::Print(" "),
-            )?;
             queue!(self.writer, style::SetForegroundColor(COLORS[m.color_idx]))?;
             if m.is_exploding() {
                 for ep in m.explosion() {
@@ -151,7 +126,6 @@ impl crate::Output for ConsoleOutput {
                         cursor::MoveTo(ep.x, ep.y),
                         style::Print(&m.texture_horizontal)
                     )?;
-                    self.to_clear.push(ep);
                 }
             } else if m.is_alive {
                 let tx = if m.dir.is_vertical() {
@@ -175,9 +149,6 @@ impl crate::Output for ConsoleOutput {
             queue!(self.writer, style::ResetColor)?;
         }
         self.writer.flush()?;
-
-        self.prev_p1 = p1.pos;
-        self.prev_p2 = p2.pos;
 
         Ok(())
     }

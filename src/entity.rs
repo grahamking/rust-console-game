@@ -1,5 +1,8 @@
+use log::debug;
+
 const EXPLODE_FRAMES: u16 = 4;
 
+#[derive(Debug)]
 pub struct Entity {
     pub is_alive: bool,
     pub name: Option<String>,
@@ -12,6 +15,8 @@ pub struct Entity {
     pub texture_horizontal: String,
     pub texture_explosion: Option<String>,
     pub speed: u16,
+    pub range: Option<i16>,
+    pub is_hit: bool,
 
     is_bounce: bool,
     is_explodable: bool,
@@ -19,7 +24,6 @@ pub struct Entity {
     w: u16, // board width
     h: u16, // board height
 
-    range: Option<i16>,
     explode_timer: Option<u16>,
 }
 
@@ -34,9 +38,10 @@ pub fn new_player(name: &str, pchar: String, color_idx: usize, w: u16, h: u16) -
         prev: crate::Pos { x: 0, y: 0 },
         pos: crate::Pos { x: 0, y: 0 },
         dir: crate::Dir::None,
-        lives: Some(5),
+        lives: Some(crate::PLAYER_LIVES),
         is_alive: true,
         is_bounce: true,
+        is_hit: false,
 
         speed: 1,
         is_explodable: false,
@@ -70,6 +75,7 @@ pub fn new_missile(
         range: Some(range),
         explode_timer: None,
         is_explodable: true,
+        is_hit: false,
 
         name: None,
         lives: None,
@@ -97,6 +103,7 @@ pub fn new_ray(
         speed: range,
         is_bounce: false,
         range: Some(range as i16),
+        is_hit: false,
 
         explode_timer: None,
         texture_explosion: None,
@@ -131,6 +138,11 @@ impl Entity {
         } else if self.is_bounce {
             self.dir = self.dir.opposite(); // bounce back onto the board
         } else {
+            debug!(
+                "dead because not on board. {} not in {},{}",
+                next_pos, self.w, self.h
+            );
+
             self.is_alive = false;
         }
         if self.range.is_some() {
@@ -183,6 +195,7 @@ impl Entity {
         if *l == 0 {
             self.is_alive = false;
         }
+        self.is_hit = true;
     }
 
     pub fn is_exploding(&self) -> bool {
