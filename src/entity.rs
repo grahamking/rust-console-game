@@ -38,7 +38,7 @@ pub fn new_player(name: &str, pchar: String, color_idx: usize, w: u16, h: u16) -
         prev: crate::Pos { x: 0, y: 0 },
         pos: crate::Pos { x: 0, y: 0 },
         dir: crate::Dir::None,
-        lives: Some(crate::PLAYER_LIVES),
+        lives: Some(crate::PLAYER_LIVES as usize),
         is_alive: true,
         is_bounce: true,
         is_hit: false,

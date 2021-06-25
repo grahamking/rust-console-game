@@ -87,34 +87,42 @@ impl crate::Output for ConsoleOutput {
         Ok(())
     }
 
-    fn start(&mut self, p1: &crate::Entity, p2: &crate::Entity) -> Result<(), Box<dyn Error>> {
+    fn start(&mut self, p1_lives: u32, p2_lives: u32) -> Result<(), Box<dyn Error>> {
         queue!(self.writer, terminal::Clear(terminal::ClearType::All))?;
-        self.draw_board(*p1.lives.as_ref().unwrap(), *p2.lives.as_ref().unwrap())?;
+        self.draw_board(p1_lives as usize, p2_lives as usize)?;
         Ok(())
     }
 
-    fn render(
-        &mut self,
-        p1: &crate::Entity,
-        p2: &crate::Entity,
-        missiles: &[crate::Entity],
-    ) -> Result<(), Box<dyn Error>> {
+    fn render(&mut self, w: &mut crate::World) -> Result<(), Box<dyn Error>> {
         queue!(self.writer, terminal::Clear(terminal::ClearType::All))?;
-        self.draw_board(p1.lives.unwrap(), p2.lives.unwrap())?;
+        self.draw_board(w.p1_lives as usize, w.p2_lives as usize)?;
 
-        // draw players
-        queue!(
-            self.writer,
-            cursor::MoveTo(p1.pos.x, p1.pos.y),
-            style::SetAttribute(style::Attribute::Bold),
-            style::SetForegroundColor(COLORS[1]),
-            style::Print(&p1.texture_horizontal),
-            cursor::MoveTo(p2.pos.x, p2.pos.y),
-            style::SetForegroundColor(COLORS[2]),
-            style::Print(&p2.texture_horizontal),
-            style::SetAttribute(style::Attribute::Reset),
-            style::ResetColor,
-        )?;
+        for entity_id in crate::alive_entities(w) {
+            let pos = w.position[entity_id];
+            let sprite = &w.sprite[entity_id];
+            let (_, dir) = w.velocity[entity_id];
+            let tx = if dir.is_vertical() {
+                &sprite.texture_vertical[0]
+            } else {
+                &sprite.texture_horizontal[0]
+            };
+            queue!(
+                self.writer,
+                cursor::MoveTo(pos.x as u16, pos.y as u16),
+                style::SetForegroundColor(COLORS[sprite.color_idx]),
+            )?;
+            if sprite.is_bold {
+                queue!(self.writer, style::SetAttribute(style::Attribute::Bold))?;
+            }
+            queue!(
+                self.writer,
+                style::Print(tx),
+                style::SetAttribute(style::Attribute::Reset),
+                style::ResetColor,
+            )?;
+        }
+
+        /*
 
         // draw missiles
         for m in missiles {
@@ -148,6 +156,7 @@ impl crate::Output for ConsoleOutput {
             }
             queue!(self.writer, style::ResetColor)?;
         }
+        */
         self.writer.flush()?;
 
         Ok(())
