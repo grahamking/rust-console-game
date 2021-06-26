@@ -26,10 +26,16 @@ pub fn new() -> ConsoleOutput {
 }
 
 impl ConsoleOutput {
-    fn draw_board(&mut self, p1_lives: usize, p2_lives: usize) -> Result<(), Box<dyn Error>> {
+    fn draw_board(
+        &mut self,
+        p1_lives: usize,
+        p1_energy: u32,
+        p2_lives: usize,
+        p2_energy: u32,
+    ) -> Result<(), Box<dyn Error>> {
         let top = 1;
         let bottom = self.h - 2;
-        self.draw_status(p1_lives, p2_lives)?;
+        self.draw_status(p1_lives, p1_energy, p2_lives, p2_energy)?;
 
         let mut stdout = &self.writer;
 
@@ -56,10 +62,26 @@ impl ConsoleOutput {
         Ok(())
     }
 
-    fn draw_status(&mut self, p1_lives: usize, p2_lives: usize) -> Result<(), Box<dyn Error>> {
+    fn draw_status(
+        &mut self,
+        p1_lives: usize,
+        p1_energy: u32,
+        p2_lives: usize,
+        p2_energy: u32,
+    ) -> Result<(), Box<dyn Error>> {
         let third_width = self.w / 3;
-        let player1 = format!("Player 1: {} / {}", p1_lives, crate::PLAYER_LIVES);
-        let player2 = format!("Player 2: {} / {}", p2_lives, crate::PLAYER_LIVES);
+        let player1 = format!(
+            "Player 1: {} / {}. Energy: {}",
+            p1_lives,
+            crate::PLAYER_LIVES,
+            p1_energy
+        );
+        let player2 = format!(
+            "Player 2: {} / {}. Energy: {}",
+            p2_lives,
+            crate::PLAYER_LIVES,
+            p2_energy
+        );
         queue!(
             self.writer,
             cursor::MoveTo(third_width - player1.len() as u16 / 2, 0),
@@ -87,15 +109,14 @@ impl crate::Output for ConsoleOutput {
         Ok(())
     }
 
-    fn start(&mut self, p1_lives: u32, p2_lives: u32) -> Result<(), Box<dyn Error>> {
-        queue!(self.writer, terminal::Clear(terminal::ClearType::All))?;
-        self.draw_board(p1_lives as usize, p2_lives as usize)?;
-        Ok(())
-    }
-
     fn render(&mut self, w: &mut crate::World) -> Result<(), Box<dyn Error>> {
         queue!(self.writer, terminal::Clear(terminal::ClearType::All))?;
-        self.draw_board(w.p1_lives as usize, w.p2_lives as usize)?;
+        self.draw_board(
+            w.p1_lives as usize,
+            w.energy[w.player1],
+            w.p2_lives as usize,
+            w.energy[w.player2],
+        )?;
 
         for entity_id in crate::alive_entities(w) {
             let pos = w.position[entity_id];

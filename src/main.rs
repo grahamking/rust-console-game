@@ -1,4 +1,5 @@
 use log::debug;
+use rand::{thread_rng, Rng};
 use simplelog::{Config, LevelFilter, WriteLogger};
 use std::error::Error;
 use std::fs::File;
@@ -20,7 +21,11 @@ mod input;
 use input::InputEvent;
 
 const PLAYER_LIVES: u32 = 3;
-const PLAYER_ENERGY: u32 = 100;
+const MAX_ENERGY: u32 = 100;
+const ENERGY_TELEPORT: u32 = 25;
+const ENERGY_MISSILE: u32 = 10;
+const ENERGY_RAY: u32 = 75;
+const ENERGY_EVERY: u32 = 10; // new energy every x turns
 
 const DEBUG: bool = true;
 const DEBUG_SPEED: bool = false;
@@ -35,9 +40,6 @@ trait Output {
 
     // Width and height of display, in whatever units makes sense
     fn dimensions(&self) -> Result<(u16, u16), Box<dyn Error>>;
-
-    // Render start positions
-    fn start(&mut self, p1_lives: u32, p2_lives: u32) -> Result<(), Box<dyn Error>>;
 
     // Update display, called every frame
     fn render(&mut self, w: &mut World) -> Result<(), Box<dyn Error>>;
@@ -56,6 +58,7 @@ enum System {
     Move,
     Lifetime,
     Collision,
+    EnergyReload(u32),
 }
 
 impl System {
@@ -69,6 +72,12 @@ impl System {
             }
             System::Collision => {
                 collision_system(world);
+            }
+            System::EnergyReload(n) => {
+                if *n == 0 {
+                    energy_system(world);
+                }
+                *n = (*n + 1) % ENERGY_EVERY;
             }
         }
     }
@@ -128,6 +137,14 @@ fn collision_system(w: &mut World) {
                 w.alive[id1] = false;
                 w.alive[id2] = false;
             }
+        }
+    }
+}
+
+fn energy_system(w: &mut World) {
+    for n in w.energy.iter_mut() {
+        if *n < MAX_ENERGY {
+            *n += 1;
         }
     }
 }
@@ -209,7 +226,7 @@ fn new_player(w: &mut World, name: String, texture: String, color_idx: usize) ->
         texture_horizontal: vec![texture.clone()],
         texture_explosion: vec![None],
     });
-    w.energy.push(PLAYER_ENERGY);
+    w.energy.push(MAX_ENERGY);
     w.shield.push(false);
     w.bounce.push(true);
     w.explode.push((false, false));
@@ -282,6 +299,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     out.banner(&[
         "Player 1   Move: w a s d.    Fire modifier: Shift",
         "Player 2   Move: Arrow keys. Fire modifier: Alt  ",
+        "",
+        "With fire  modifier: Up = Missle, Down = Toggle Shield, Left = Death Ray, Right = Teleport",
+        "",
         "Esc to quit                                      ",
         "Press any key to start",
     ])?;
@@ -357,14 +377,19 @@ fn winner_banner<T: Output>(w: &mut World, out: &mut T) -> Result<(), Box<dyn Er
 
 // Returns Ok(true) when it's time to exit
 fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Error>> {
+    let mut rng = thread_rng();
     w.alive[w.player1] = true;
     w.alive[w.player2] = true;
 
-    let mut system = vec![System::Move, System::Lifetime, System::Collision];
+    let mut system = vec![
+        System::Move,
+        System::Lifetime,
+        System::Collision,
+        System::EnergyReload(0),
+    ];
     let render = Render {};
 
     to_start_positions(w);
-    out.start(w.p1_lives, w.p2_lives)?;
 
     let mut is_quit = false;
     while !is_quit && both_players_standing(w) {
@@ -397,35 +422,50 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Erro
                         continue;
                     }
 
+                    let e = w.energy[id];
                     match kind {
                         input::FireKind::Up => {
-                            new_missile(w, pos, dir, w.sprite[id].color_idx);
+                            if e > ENERGY_MISSILE {
+                                new_missile(w, pos, dir, w.sprite[id].color_idx);
+                                w.energy[id] -= ENERGY_MISSILE;
+                            }
                         }
                         input::FireKind::Down => {
                             w.shield[id] = !w.shield[id];
                         }
                         input::FireKind::Left => {
-                            // TODO ray
-                            /*
-                            let dist_to_edge = match dir {
-                                Dir::Left => pos.x - 1,
-                                Dir::Right => w - 2 - pos.x,
-                                Dir::Up => pos.y - 2,
-                                Dir::Down => h - 2 - pos.y - 1,
-                                Dir::None => 0,
-                            };
-                            missiles.push(entity::new_ray(
-                                pos,
-                                dir,
-                                p.color_idx,
-                                dist_to_edge,
-                                w,
-                                h,
-                            ));
-                            */
+                            if e > ENERGY_RAY {
+                                // TODO ray
+                                /*
+                                let dist_to_edge = match dir {
+                                    Dir::Left => pos.x - 1,
+                                    Dir::Right => w - 2 - pos.x,
+                                    Dir::Up => pos.y - 2,
+                                    Dir::Down => h - 2 - pos.y - 1,
+                                    Dir::None => 0,
+                                };
+                                missiles.push(entity::new_ray(
+                                    pos,
+                                    dir,
+                                    p.color_idx,
+                                    dist_to_edge,
+                                    w,
+                                    h,
+                                ));
+                                */
+                            }
                         }
                         input::FireKind::Right => {
-                            // TODO: teleport
+                            if e > ENERGY_TELEPORT {
+                                // Make the ranges match is_on_board
+                                let new_pos = Pos {
+                                    x: rng.gen_range(1..w.width),      // 1 to width-1
+                                    y: rng.gen_range(2..w.height - 1), // 2 to height-2
+                                    invalid: false,
+                                };
+                                w.position[id] = new_pos;
+                                w.energy[id] -= ENERGY_TELEPORT;
+                            }
                         }
                     }
                 }
@@ -486,5 +526,6 @@ fn to_start_positions(w: &mut World) {
 }
 
 fn is_on_board(pos: Pos, w: u32, h: u32) -> bool {
+    // If changing here also update teleport
     !pos.invalid && 1 <= pos.x && pos.x < w - 1 && 2 <= pos.y && pos.y < h - 2
 }
