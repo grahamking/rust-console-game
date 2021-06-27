@@ -94,17 +94,25 @@ impl Render {
 fn move_system(w: &mut World) {
     for entity_id in alive_entities(w) {
         let (quantity, direction) = w.velocity[entity_id];
-        let next = w.position[entity_id].moved(quantity, direction);
-        if is_on_board(next, w.width, w.height) {
-            w.position[entity_id] = next;
-        } else if w.bounce[entity_id] {
-            w.velocity[entity_id] = (quantity, direction.opposite());
-        } else {
-            debug!(
-                "dead because not on board. {} not in {},{}",
-                next, w.width, w.height,
-            );
-            w.alive[entity_id] = false;
+        if quantity == 0 {
+            continue;
+        }
+        for p in w.position[entity_id].iter_mut() {
+            let next = p.moved(quantity, direction);
+            if is_on_board(next, w.width, w.height) {
+                //w.position[entity_id] = next;
+                *p = next;
+            } else if w.bounce[entity_id] {
+                w.velocity[entity_id] = (quantity, direction.opposite());
+                break;
+            } else {
+                debug!(
+                    "dead because not on board. {} not in {},{}",
+                    next, w.width, w.height,
+                );
+                w.alive[entity_id] = false;
+                break;
+            }
         }
     }
 }
@@ -126,16 +134,20 @@ fn lifetime_system(w: &mut World) {
 // Check for collisions
 fn collision_system(w: &mut World) {
     let ids = alive_entities(w);
-    for (id1, idx) in ids.iter().enumerate() {
-        let p1 = w.position[id1];
+    'top: for (id1, idx) in ids.iter().enumerate() {
         for &id2 in ids.iter().skip(*idx) {
             if id1 == id2 {
                 continue;
             }
-            if p1.does_hit(w.position[id2]) {
-                debug!("{} hits {}", w.name[id1], w.name[id2]);
-                w.alive[id1] = false;
-                w.alive[id2] = false;
+            for p1 in w.position[id1].iter() {
+                for p2 in w.position[id2].iter() {
+                    if p1.does_hit(*p2) {
+                        debug!("{} hits {}", w.name[id1], w.name[id2]);
+                        w.alive[id1] = false;
+                        w.alive[id2] = false;
+                        break 'top;
+                    }
+                }
             }
         }
     }
@@ -165,7 +177,7 @@ struct World {
     lifetime: Vec<Lifetime>, // how long it displays for
     sprite: Vec<Sprite>,
     velocity: Vec<(u32, Dir)>, // (quantity, direction)
-    position: Vec<Pos>,
+    position: Vec<Vec<Pos>>,
     hitbox: Vec<Rectangle>,
     energy: Vec<u32>,
     shield: Vec<bool>,
@@ -232,7 +244,7 @@ fn new_player(w: &mut World, name: String, texture: String, color_idx: usize) ->
     w.explode.push((false, false));
 
     // placeholders, set later in to_start_positions
-    w.position.push(Pos::nil());
+    w.position.push(vec![Pos::nil()]);
     w.hitbox.push(Rectangle {
         top_left: Pos::nil(),
         bottom_right: Pos::nil(),
@@ -245,7 +257,7 @@ fn new_missile(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
     w.name.push(format!("Missile {}", w.name.len()));
     w.alive.push(true);
     w.lifetime.push(Lifetime::Temporary(w.missile_range));
-    w.position.push(start_pos);
+    w.position.push(vec![start_pos, start_pos.moved(1, dir)]);
     w.velocity.push((2, dir));
     w.sprite.push(Sprite {
         color_idx,
@@ -411,7 +423,7 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Erro
                         2 => w.player2,
                         _ => panic!("impossible player id"),
                     };
-                    let (mut pos, dir) = (w.position[id], w.velocity[id].1);
+                    let (mut pos, dir) = (w.position[id][0], w.velocity[id].1);
                     if dir == Dir::None {
                         continue; // can't fire when not moving
                     }
@@ -463,7 +475,7 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Erro
                                     y: rng.gen_range(2..w.height - 1), // 2 to height-2
                                     invalid: false,
                                 };
-                                w.position[id] = new_pos;
+                                w.position[id][0] = new_pos;
                                 w.energy[id] -= ENERGY_TELEPORT;
                             }
                         }
@@ -509,7 +521,7 @@ fn to_start_positions(w: &mut World) {
         y: w.height / 2,
         invalid: false,
     };
-    w.position[p1] = p1_pos;
+    w.position[p1][0] = p1_pos;
     w.velocity[p1].1 = Dir::None;
     w.hitbox[p1].top_left = p1_pos;
     w.hitbox[p1].bottom_right = p1_pos;
@@ -519,7 +531,7 @@ fn to_start_positions(w: &mut World) {
         y: w.height / 2,
         invalid: false,
     };
-    w.position[p2] = p2_pos;
+    w.position[p2][0] = p2_pos;
     w.velocity[p2].1 = Dir::None;
     w.hitbox[p2].top_left = p2_pos;
     w.hitbox[p2].bottom_right = p2_pos;

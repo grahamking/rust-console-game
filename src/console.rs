@@ -119,7 +119,6 @@ impl crate::Output for ConsoleOutput {
         )?;
 
         for entity_id in crate::alive_entities(w) {
-            let pos = w.position[entity_id];
             let sprite = &w.sprite[entity_id];
             let (_, dir) = w.velocity[entity_id];
             let tx = if dir.is_vertical() {
@@ -127,17 +126,19 @@ impl crate::Output for ConsoleOutput {
             } else {
                 &sprite.texture_horizontal[0]
             };
-            queue!(
-                self.writer,
-                cursor::MoveTo(pos.x as u16, pos.y as u16),
-                style::SetForegroundColor(COLORS[sprite.color_idx]),
-            )?;
             if sprite.is_bold {
                 queue!(self.writer, style::SetAttribute(style::Attribute::Bold))?;
             }
+            for pos in w.position[entity_id].iter() {
+                queue!(
+                    self.writer,
+                    cursor::MoveTo(pos.x as u16, pos.y as u16),
+                    style::SetForegroundColor(COLORS[sprite.color_idx]),
+                    style::Print(tx),
+                )?;
+            }
             queue!(
                 self.writer,
-                style::Print(tx),
                 style::SetAttribute(style::Attribute::Reset),
                 style::ResetColor,
             )?;
