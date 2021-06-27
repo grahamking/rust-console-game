@@ -7,7 +7,7 @@ const TITLE: &str = "Hash Bang";
 
 lazy_static! {
     static ref COLORS: Vec<style::Color> =
-        vec![style::Color::Grey, style::Color::Yellow, style::Color::Cyan,];
+        vec![style::Color::Grey, style::Color::Yellow, style::Color::Cyan];
 }
 
 pub struct ConsoleOutput {
