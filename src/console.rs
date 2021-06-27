@@ -26,16 +26,10 @@ pub fn new() -> ConsoleOutput {
 }
 
 impl ConsoleOutput {
-    fn draw_board(
-        &mut self,
-        p1_lives: usize,
-        p1_energy: u32,
-        p2_lives: usize,
-        p2_energy: u32,
-    ) -> Result<(), Box<dyn Error>> {
+    fn draw_board(&mut self, world: &crate::World) -> Result<(), Box<dyn Error>> {
         let top = 1;
         let bottom = self.h - 2;
-        self.draw_status(p1_lives, p1_energy, p2_lives, p2_energy)?;
+        self.draw_status(world)?;
 
         let mut stdout = &self.writer;
 
@@ -62,26 +56,26 @@ impl ConsoleOutput {
         Ok(())
     }
 
-    fn draw_status(
-        &mut self,
-        p1_lives: usize,
-        p1_energy: u32,
-        p2_lives: usize,
-        p2_energy: u32,
-    ) -> Result<(), Box<dyn Error>> {
+    fn draw_status(&mut self, world: &crate::World) -> Result<(), Box<dyn Error>> {
         let third_width = self.w / 3;
-        let player1 = format!(
+        let mut player1 = format!(
             "Player 1: {} / {}. Energy: {}",
-            p1_lives,
+            world.p1_lives,
             crate::PLAYER_LIVES,
-            p1_energy
+            world.energy[world.player1],
         );
-        let player2 = format!(
+        if world.shield[world.player1] {
+            player1 += ". SHIELD ON.";
+        }
+        let mut player2 = format!(
             "Player 2: {} / {}. Energy: {}",
-            p2_lives,
+            world.p2_lives,
             crate::PLAYER_LIVES,
-            p2_energy
+            world.energy[world.player2],
         );
+        if world.shield[world.player2] {
+            player2 += ". SHIELD ON.";
+        }
         queue!(
             self.writer,
             cursor::MoveTo(third_width - player1.len() as u16 / 2, 0),
@@ -111,17 +105,17 @@ impl crate::Output for ConsoleOutput {
 
     fn render(&mut self, w: &mut crate::World) -> Result<(), Box<dyn Error>> {
         queue!(self.writer, terminal::Clear(terminal::ClearType::All))?;
-        self.draw_board(
-            w.p1_lives as usize,
-            w.energy[w.player1],
-            w.p2_lives as usize,
-            w.energy[w.player2],
-        )?;
+        self.draw_board(w)?;
 
-        for entity_id in crate::alive_entities(w) {
-            let sprite = &w.sprite[entity_id];
-            let (_, dir) = w.velocity[entity_id];
-            let tx = if dir.is_vertical() {
+        for id in crate::alive_entities(w) {
+            let sprite = &w.sprite[id];
+            let (_, dir) = w.velocity[id];
+            let is_player = id == w.player1 || id == w.player2;
+            let tx: &str = if is_player && w.shield[id] {
+                "@"
+            } else if w.explode[id].1 {
+                sprite.texture_explosion[0].as_ref().unwrap()
+            } else if dir.is_vertical() {
                 &sprite.texture_vertical[0]
             } else {
                 &sprite.texture_horizontal[0]
@@ -129,7 +123,7 @@ impl crate::Output for ConsoleOutput {
             if sprite.is_bold {
                 queue!(self.writer, style::SetAttribute(style::Attribute::Bold))?;
             }
-            for pos in w.position[entity_id].iter() {
+            for pos in w.position[id].iter() {
                 queue!(
                     self.writer,
                     cursor::MoveTo(pos.x as u16, pos.y as u16),
@@ -143,44 +137,7 @@ impl crate::Output for ConsoleOutput {
                 style::ResetColor,
             )?;
         }
-
-        /*
-
-        // draw missiles
-        for m in missiles {
-            queue!(self.writer, style::SetForegroundColor(COLORS[m.color_idx]))?;
-            if m.is_exploding() {
-                for ep in m.explosion() {
-                    queue!(
-                        self.writer,
-                        cursor::MoveTo(ep.x, ep.y),
-                        style::Print(&m.texture_horizontal)
-                    )?;
-                }
-            } else if m.is_alive {
-                let tx = if m.dir.is_vertical() {
-                    &m.texture_vertical
-                } else {
-                    &m.texture_horizontal
-                };
-                let opposite = m.dir.opposite();
-                let mut draw_pos = m.pos;
-                for _ in 0..m.speed {
-                    if crate::is_on_board(draw_pos.x, draw_pos.y, self.w, self.h) {
-                        queue!(
-                            self.writer,
-                            cursor::MoveTo(draw_pos.x, draw_pos.y),
-                            style::Print(tx),
-                        )?;
-                    }
-                    draw_pos = draw_pos.moved(opposite);
-                }
-            }
-            queue!(self.writer, style::ResetColor)?;
-        }
-        */
         self.writer.flush()?;
-
         Ok(())
     }
 

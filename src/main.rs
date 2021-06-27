@@ -20,12 +20,15 @@ use pos::Pos;
 mod input;
 use input::InputEvent;
 
-const PLAYER_LIVES: u32 = 3;
+const PLAYER_LIVES: u32 = 10;
 const MAX_ENERGY: u32 = 100;
-const ENERGY_TELEPORT: u32 = 25;
-const ENERGY_MISSILE: u32 = 10;
-const ENERGY_RAY: u32 = 75;
-const ENERGY_EVERY: u32 = 10; // new energy every x turns
+const LIFETIME_RAY: u32 = 10;
+const EXPLODE_DURATION: u32 = 5;
+const ENERGY_TELEPORT: u32 = 15;
+const ENERGY_MISSILE: u32 = 3;
+const ENERGY_RAY: u32 = 25;
+const ENERGY_SHIELD: u32 = 3; // deduct this every ENERGY_EVERY
+const ENERGY_EVERY: u32 = 5; // new energy every x turns
 
 const DEBUG: bool = true;
 const DEBUG_SPEED: bool = false;
@@ -59,6 +62,7 @@ enum System {
     Lifetime,
     Collision,
     EnergyReload(u32),
+    Explode,
 }
 
 impl System {
@@ -78,6 +82,9 @@ impl System {
                     energy_system(world);
                 }
                 *n = (*n + 1) % ENERGY_EVERY;
+            }
+            System::Explode => {
+                explode_system(world);
             }
         }
     }
@@ -143,8 +150,12 @@ fn collision_system(w: &mut World) {
                 for p2 in w.position[id2].iter() {
                     if p1.does_hit(*p2) {
                         debug!("{} hits {}", w.name[id1], w.name[id2]);
-                        w.alive[id1] = false;
-                        w.alive[id2] = false;
+                        if !w.shield[id1] {
+                            w.alive[id1] = false;
+                        }
+                        if !w.shield[id2] {
+                            w.alive[id2] = false;
+                        }
                         break 'top;
                     }
                 }
@@ -153,12 +164,81 @@ fn collision_system(w: &mut World) {
     }
 }
 
+// Add energy at regular intervals, deduct energy for shield
 fn energy_system(w: &mut World) {
-    for n in w.energy.iter_mut() {
+    w.energy.iter_mut().for_each(|n| {
         if *n < MAX_ENERGY {
             *n += 1;
         }
+    });
+    let shielded: Vec<usize> = w
+        .shield
+        .iter()
+        .enumerate()
+        .filter_map(|(id, has_shield)| if *has_shield { Some(id) } else { None })
+        .collect();
+    for id in shielded {
+        let e = &mut w.energy[id];
+        if *e > ENERGY_SHIELD {
+            *e -= ENERGY_SHIELD;
+        } else {
+            // ran out of energy, shield off
+            w.shield[id] = false;
+        }
     }
+}
+
+// switch missiles to exploding
+fn explode_system(w: &mut World) {
+    // entity ids that:
+    // - explode
+    // - are not yet exploding
+    // - are within EXPLODE_DURATION of their end of life
+    let to_explode: Vec<usize> = w
+        .explode
+        .iter()
+        .enumerate()
+        .filter_map(|(id, (will_explode, is_exploding))| {
+            if *will_explode && !is_exploding {
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .filter(|&id| matches!(w.lifetime[id], Lifetime::Temporary(n) if n <= EXPLODE_DURATION))
+        .collect();
+
+    to_explode.iter().for_each(|&id| {
+        w.explode[id].1 = true; // set is_exploding
+        w.position[id] = explosion(w.position[id][0], w.width, w.height);
+        w.velocity[id] = (0, Dir::None);
+    });
+}
+
+// Positions for an explosion originating at p
+fn explosion(p: Pos, width: u32, height: u32) -> Vec<Pos> {
+    let mut v = Vec::with_capacity(25);
+    let src_x: i32 = p.x as i32;
+    let src_y: i32 = p.y as i32;
+    for x in src_x - 2..=src_x + 2 {
+        if x < 0 {
+            continue;
+        }
+        for y in src_y - 2..=src_y + 2 {
+            if y < 0 {
+                continue;
+            }
+            let e = Pos {
+                x: x as u32,
+                y: y as u32,
+                invalid: false,
+            };
+            if is_on_board(e, width, height) {
+                v.push(e);
+            }
+        }
+    }
+    v
 }
 
 struct World {
@@ -178,7 +258,6 @@ struct World {
     sprite: Vec<Sprite>,
     velocity: Vec<(u32, Dir)>, // (quantity, direction)
     position: Vec<Vec<Pos>>,
-    hitbox: Vec<Rectangle>,
     energy: Vec<u32>,
     shield: Vec<bool>,
     bounce: Vec<bool>,
@@ -193,7 +272,6 @@ impl World {
         self.sprite = Vec::new();
         self.velocity = Vec::new();
         self.position = Vec::new();
-        self.hitbox = Vec::new();
         self.energy = Vec::new();
         self.shield = Vec::new();
         self.bounce = Vec::new();
@@ -235,7 +313,7 @@ fn new_player(w: &mut World, name: String, texture: String, color_idx: usize) ->
         is_bold: true,
         frame_num: 0,
         texture_vertical: vec![texture.clone()],
-        texture_horizontal: vec![texture.clone()],
+        texture_horizontal: vec![texture],
         texture_explosion: vec![None],
     });
     w.energy.push(MAX_ENERGY);
@@ -243,12 +321,8 @@ fn new_player(w: &mut World, name: String, texture: String, color_idx: usize) ->
     w.bounce.push(true);
     w.explode.push((false, false));
 
-    // placeholders, set later in to_start_positions
+    // placeholder, set later in to_start_positions
     w.position.push(vec![Pos::nil()]);
-    w.hitbox.push(Rectangle {
-        top_left: Pos::nil(),
-        bottom_right: Pos::nil(),
-    });
 
     id
 }
@@ -271,15 +345,40 @@ fn new_missile(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
     w.shield.push(false);
     w.bounce.push(false);
     w.explode.push((true, false));
-    w.hitbox.push(Rectangle {
-        top_left: start_pos,
-        bottom_right: start_pos,
-    });
 }
 
-struct Rectangle {
-    top_left: Pos,
-    bottom_right: Pos,
+fn new_ray(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
+    let dist_to_edge = match dir {
+        Dir::Left => start_pos.x - 1,
+        Dir::Right => w.width - 2 - start_pos.x,
+        Dir::Up => start_pos.y - 2,
+        Dir::Down => w.height - 2 - start_pos.y - 1,
+        Dir::None => 0,
+    };
+    let mut positions = Vec::with_capacity(dist_to_edge as usize);
+    let mut p = start_pos;
+    (0..dist_to_edge).for_each(|_| {
+        positions.push(p);
+        p = p.moved(1, dir);
+    });
+    w.position.push(positions);
+
+    w.name.push(format!("Ray {}", w.name.len()));
+    w.alive.push(true);
+    w.lifetime.push(Lifetime::Temporary(LIFETIME_RAY));
+    w.velocity.push((1, dir));
+    w.sprite.push(Sprite {
+        color_idx,
+        is_bold: false,
+        frame_num: 0,
+        texture_vertical: vec!["|".to_string()],
+        texture_horizontal: vec!["-".to_string()],
+        texture_explosion: vec![None],
+    });
+    w.energy.push(0);
+    w.shield.push(true); // does not get destroyed by a collision
+    w.bounce.push(false);
+    w.explode.push((false, false));
 }
 
 enum Lifetime {
@@ -312,7 +411,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "Player 1   Move: w a s d.    Fire modifier: Shift",
         "Player 2   Move: Arrow keys. Fire modifier: Alt  ",
         "",
-        "With fire  modifier: Up = Missle, Down = Toggle Shield, Left = Death Ray, Right = Teleport",
+        "With fire  modifier: Up = Missile, Down = Toggle Shield, Left = Death Ray, Right = Teleport",
         "",
         "Esc to quit                                      ",
         "Press any key to start",
@@ -335,7 +434,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         sprite: Vec::new(),
         velocity: Vec::new(),
         position: Vec::new(),
-        hitbox: Vec::new(),
         energy: Vec::new(),
         shield: Vec::new(),
         bounce: Vec::new(),
@@ -398,6 +496,7 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Erro
         System::Lifetime,
         System::Collision,
         System::EnergyReload(0),
+        System::Explode,
     ];
     let render = Render {};
 
@@ -447,24 +546,8 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Erro
                         }
                         input::FireKind::Left => {
                             if e > ENERGY_RAY {
-                                // TODO ray
-                                /*
-                                let dist_to_edge = match dir {
-                                    Dir::Left => pos.x - 1,
-                                    Dir::Right => w - 2 - pos.x,
-                                    Dir::Up => pos.y - 2,
-                                    Dir::Down => h - 2 - pos.y - 1,
-                                    Dir::None => 0,
-                                };
-                                missiles.push(entity::new_ray(
-                                    pos,
-                                    dir,
-                                    p.color_idx,
-                                    dist_to_edge,
-                                    w,
-                                    h,
-                                ));
-                                */
+                                new_ray(w, pos, dir, w.sprite[id].color_idx);
+                                w.energy[id] -= ENERGY_RAY;
                             }
                         }
                         input::FireKind::Right => {
@@ -523,8 +606,6 @@ fn to_start_positions(w: &mut World) {
     };
     w.position[p1][0] = p1_pos;
     w.velocity[p1].1 = Dir::None;
-    w.hitbox[p1].top_left = p1_pos;
-    w.hitbox[p1].bottom_right = p1_pos;
 
     let p2_pos = Pos {
         x: quarter * 3,
@@ -533,8 +614,6 @@ fn to_start_positions(w: &mut World) {
     };
     w.position[p2][0] = p2_pos;
     w.velocity[p2].1 = Dir::None;
-    w.hitbox[p2].top_left = p2_pos;
-    w.hitbox[p2].bottom_right = p2_pos;
 }
 
 fn is_on_board(pos: Pos, w: u32, h: u32) -> bool {
