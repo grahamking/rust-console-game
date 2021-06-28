@@ -70,17 +70,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hashbang"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "lazy_static",
- "log",
- "rand",
- "simplelog",
-]
-
-[[package]]
 name = "instant"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -247,6 +236,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "742739e41cd49414de871ea5e549afb7e2a3ac77b589bcbebe8c82fab37147fc"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "rust-console-game"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "lazy_static",
+ "log",
+ "rand",
+ "simplelog",
 ]
 
 [[package]]

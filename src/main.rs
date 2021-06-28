@@ -408,6 +408,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     out.init()?;
 
     out.banner(&[
+        "R U S T   C O N S O L E   G A M E",
+        "",
+        "Instructions:",
         "Player 1   Move: w a s d.    Fire modifier: Shift",
         "Player 2   Move: Arrow keys. Fire modifier: Alt  ",
         "",
@@ -454,13 +457,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // a player must have been hit, freeze the screen
-        thread::sleep(Duration::from_millis(HIT_PAUSE_MS));
-        let name = if !world.alive[world.player1] {
-            &world.name[world.player1]
+        let p1a = world.alive[world.player1];
+        let p2a = world.alive[world.player2];
+        let name = if !p1a && !p2a {
+            let mut s = world.name[world.player1].clone();
+            s.push_str(" and ");
+            s.push_str(&world.name[world.player2]);
+            s
+        } else if !p1a {
+            world.name[world.player1].clone()
         } else {
-            &world.name[world.player2]
+            world.name[world.player2].clone()
         };
-        out.banner(&[&format!("{} is hit!", name), "Press any key to continue"])?;
+        thread::sleep(Duration::from_millis(HIT_PAUSE_MS));
+        out.banner(&[&format!("{} hit!", &name), "Press any key to continue"])?;
         thread::sleep(Duration::from_secs(BANNER_PAUSE_S));
 
         world.reset();
