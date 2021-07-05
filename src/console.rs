@@ -129,6 +129,9 @@ impl crate::Output for ConsoleOutput {
                 queue!(self.writer, style::SetAttribute(style::Attribute::Bold))?;
             }
             for pos in w.position[id].iter() {
+                if pos.invalid {
+                    continue;
+                }
                 queue!(
                     self.writer,
                     cursor::MoveTo(pos.x as u16, pos.y as u16),

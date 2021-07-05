@@ -105,24 +105,31 @@ fn move_system(w: &mut World) {
         if quantity == 0 {
             continue;
         }
-        let next: Vec<Pos> = w.position[entity_id]
-            .iter()
-            .map(|p| p.moved(quantity, direction))
-            .collect();
-        for (idx, next_pos) in next.into_iter().enumerate() {
-            if w.is_on_board(next_pos) {
-                w.position[entity_id][idx] = next_pos;
-            } else if w.bounce[entity_id] {
-                w.velocity[entity_id] = (quantity, direction.opposite());
-                break;
-            } else {
-                debug!(
-                    "dead because not on board. {} not in {},{}",
-                    next_pos, w.width, w.height,
-                );
-                w.alive[entity_id] = false;
-                break;
+
+        // walk each position forward
+        let mut moves = Vec::new();
+        let entity_positions = w.position[entity_id].to_owned(); // copy because borrow checker
+        'top: for (idx, mut next_p) in entity_positions.into_iter().enumerate() {
+            for _ in 0..quantity {
+                next_p = next_p.moved(1, direction);
+                if !w.is_on_board(next_p) {
+                    w.position[entity_id][idx].invalid = true;
+                    continue 'top;
+                }
             }
+            moves.push((idx, next_p));
+        }
+
+        if moves.is_empty() {
+            if w.bounce[entity_id] {
+                w.velocity[entity_id] = (quantity, direction.opposite());
+            } else {
+                debug!("{} no live positions.", w.name[entity_id]);
+                w.alive[entity_id] = false;
+            }
+        }
+        for (idx, next_pos) in moves {
+            w.position[entity_id][idx] = next_pos;
         }
     }
 }
