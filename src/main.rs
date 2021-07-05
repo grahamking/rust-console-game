@@ -254,7 +254,8 @@ struct World {
     player2: usize,
     p1_lives: u32,
     p2_lives: u32,
-    missile_range: u32,
+    missile_range_horizontal: u32,
+    missile_range_vertical: u32,
 
     name: Vec<String>,
     alive: Vec<bool>,
@@ -376,10 +377,22 @@ fn new_player(w: &mut World, name: String, texture: String, color_idx: usize) ->
 }
 
 fn new_missile(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
+    // missile have size 2. check if second half would hit an edge or obstacle
+    let pos_2 = start_pos.moved(1, dir);
+    if !w.is_on_board(pos_2) {
+        return;
+    }
     w.name.push(format!("Missile {}", w.name.len()));
     w.alive.push(true);
-    w.lifetime.push(Lifetime::Temporary(w.missile_range));
-    w.position.push(vec![start_pos, start_pos.moved(1, dir)]);
+    let range = match dir {
+        Dir::Up | Dir::Down => w.missile_range_vertical,
+        Dir::Left | Dir::Right => w.missile_range_horizontal,
+        Dir::None => {
+            panic!("Missile with no direction. Abort.");
+        }
+    };
+    w.lifetime.push(Lifetime::Temporary(range));
+    w.position.push(vec![start_pos, pos_2]);
     w.velocity.push((2, dir));
     w.sprite.push(Sprite {
         color_idx,
@@ -406,10 +419,13 @@ fn new_ray(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
     };
     let mut positions = Vec::with_capacity(dist_to_edge as usize);
     let mut p = start_pos;
-    (0..dist_to_edge).for_each(|_| {
+    for _ in 0..dist_to_edge {
         positions.push(p);
         p = p.moved(1, dir);
-    });
+        if !w.is_on_board(p) {
+            break;
+        }
+    }
     w.position.push(positions);
 
     w.name.push(format!("Ray {}", w.name.len()));
@@ -500,7 +516,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         player2: 0,
         p1_lives: PLAYER_LIVES,
         p2_lives: PLAYER_LIVES,
-        missile_range: width as u32 / 6,
+        missile_range_horizontal: width as u32 / 6,
+        missile_range_vertical: height as u32 / 5,
 
         name: Vec::new(),
         alive: Vec::new(),
@@ -638,10 +655,12 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Erro
                         input::FireKind::Right => Dir::Right,
                     };
 
-                    // move ahead of the player
-                    pos = pos.moved(2, dir);
-                    if !w.is_on_board(pos) {
-                        continue;
+                    // if firing forward move ahead of the player
+                    if dir == w.velocity[id].1 {
+                        pos = pos.moved(1, dir);
+                        if !w.is_on_board(pos) {
+                            continue;
+                        }
                     }
 
                     let e = w.energy[id];
