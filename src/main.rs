@@ -25,7 +25,7 @@ use weapon::Weapon;
 const PLAYER_LIVES: u32 = 10;
 const MAX_ENERGY: u32 = 100;
 const LIFETIME_RAY: u32 = 10;
-const EXPLODE_DURATION: u32 = 5;
+const EXPLODE_DURATION: u32 = 2;
 const ENERGY_MISSILE: u32 = 3;
 const ENERGY_RAY: u32 = 25;
 const ENERGY_SHIELD: u32 = 3; // deduct this every ENERGY_EVERY
@@ -507,8 +507,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         "R U S T   C O N S O L E   G A M E",
         "",
         "Instructions:",
-        "Player 1   Move: w a s d.    Fire: Shift + direction. Toggle shield: e. Change weapon: q",
-        "Player 2   Move: Arrow keys. Fire: Alt + direction. Toggle shield: .. Change weapon: ,",
+        "Player 1   Move: w a s d.    Fire: Shift + move direction. Toggle shield: e. Change weapon: q",
+        "Player 2   Move: Arrow keys. Fire: Alt + move direction. Toggle shield: . (period) Change weapon: , (comma)",
         "",
         "Esc to quit",
         "Press any key to start",
