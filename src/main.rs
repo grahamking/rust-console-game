@@ -1,5 +1,4 @@
 use log::debug;
-use rand::{thread_rng, Rng};
 use simplelog::{Config, LevelFilter, WriteLogger};
 use std::error::Error;
 use std::fs::File;
@@ -20,11 +19,13 @@ use pos::Pos;
 mod input;
 use input::InputEvent;
 
+mod weapon;
+use weapon::Weapon;
+
 const PLAYER_LIVES: u32 = 10;
 const MAX_ENERGY: u32 = 100;
 const LIFETIME_RAY: u32 = 10;
 const EXPLODE_DURATION: u32 = 5;
-const ENERGY_TELEPORT: u32 = 15;
 const ENERGY_MISSILE: u32 = 3;
 const ENERGY_RAY: u32 = 25;
 const ENERGY_SHIELD: u32 = 3; // deduct this every ENERGY_EVERY
@@ -104,18 +105,20 @@ fn move_system(w: &mut World) {
         if quantity == 0 {
             continue;
         }
-        for p in w.position[entity_id].iter_mut() {
-            let next = p.moved(quantity, direction);
-            if is_on_board(next, w.width, w.height) {
-                //w.position[entity_id] = next;
-                *p = next;
+        let next: Vec<Pos> = w.position[entity_id]
+            .iter()
+            .map(|p| p.moved(quantity, direction))
+            .collect();
+        for (idx, next_pos) in next.into_iter().enumerate() {
+            if w.is_on_board(next_pos) {
+                w.position[entity_id][idx] = next_pos;
             } else if w.bounce[entity_id] {
                 w.velocity[entity_id] = (quantity, direction.opposite());
                 break;
             } else {
                 debug!(
                     "dead because not on board. {} not in {},{}",
-                    next, w.width, w.height,
+                    next_pos, w.width, w.height,
                 );
                 w.alive[entity_id] = false;
                 break;
@@ -139,6 +142,8 @@ fn lifetime_system(w: &mut World) {
 }
 
 // Check for collisions
+// We don't need to worry about blocks/obstacles because move system runs first
+// and prevent us comming into contact with them.
 fn collision_system(w: &mut World) {
     let ids = alive_entities(w);
     'top: for (id1, idx) in ids.iter().enumerate() {
@@ -150,6 +155,7 @@ fn collision_system(w: &mut World) {
                 for p2 in w.position[id2].iter() {
                     if p1.does_hit(*p2) {
                         debug!("{} hits {}", w.name[id1], w.name[id2]);
+                        // unshielded entites die on contact
                         if !w.shield[id1] {
                             w.alive[id1] = false;
                         }
@@ -210,13 +216,13 @@ fn explode_system(w: &mut World) {
 
     to_explode.iter().for_each(|&id| {
         w.explode[id].1 = true; // set is_exploding
-        w.position[id] = explosion(w.position[id][0], w.width, w.height);
+        w.position[id] = explosion(w, w.position[id][0]);
         w.velocity[id] = (0, Dir::None);
     });
 }
 
 // Positions for an explosion originating at p
-fn explosion(p: Pos, width: u32, height: u32) -> Vec<Pos> {
+fn explosion(w: &World, p: Pos) -> Vec<Pos> {
     let mut v = Vec::with_capacity(25);
     let src_x: i32 = p.x as i32;
     let src_y: i32 = p.y as i32;
@@ -233,7 +239,7 @@ fn explosion(p: Pos, width: u32, height: u32) -> Vec<Pos> {
                 y: y as u32,
                 invalid: false,
             };
-            if is_on_board(e, width, height) {
+            if w.is_on_board(e) {
                 v.push(e);
             }
         }
@@ -261,7 +267,8 @@ struct World {
     energy: Vec<u32>,
     shield: Vec<bool>,
     bounce: Vec<bool>,
-    explode: Vec<(bool, bool)>, // (will explode, is exploding)
+    explode: Vec<(bool, bool)>,         // (will explode, is exploding)
+    active_weapon: Vec<Option<Weapon>>, // Is player using ray or missile?
 }
 
 impl World {
@@ -276,12 +283,52 @@ impl World {
         self.shield = Vec::new();
         self.bounce = Vec::new();
         self.explode = Vec::new();
+        self.active_weapon = Vec::new();
 
         self.add_players();
+        self.add_obstacles();
     }
     fn add_players(&mut self) {
         self.player1 = new_player(self, "Player 1".to_string(), "1".to_string(), 1);
         self.player2 = new_player(self, "Player 2".to_string(), "2".to_string(), 2);
+    }
+    fn add_obstacles(&mut self) {
+        let x = self.width / 2;
+        let third = self.height / 3;
+        for y in third..third * 2 {
+            let p = Pos {
+                x,
+                y,
+                invalid: false,
+            };
+            new_bar(self, p, Dir::Up);
+        }
+    }
+    fn is_on_board(&self, pos: Pos) -> bool {
+        // check if off board left or right
+        let x_fit = !pos.invalid && 1 <= pos.x && pos.x < self.width - 1;
+        if !x_fit {
+            return false;
+        }
+        // check if off board top and bottom
+        let y_fit = 2 <= pos.y && pos.y < self.height - 2;
+        if !y_fit {
+            return false;
+        }
+        // check if hits an obstacle
+        for (entity_id, _) in self
+            .lifetime
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| **l == Lifetime::Solid)
+        {
+            // all blocks are size 1 so far so [0] is OK
+            if self.position[entity_id][0].does_hit(pos) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -311,7 +358,7 @@ fn new_player(w: &mut World, name: String, texture: String, color_idx: usize) ->
     w.sprite.push(Sprite {
         color_idx,
         is_bold: true,
-        frame_num: 0,
+        _frame_num: 0,
         texture_vertical: vec![texture.clone()],
         texture_horizontal: vec![texture],
         texture_explosion: vec![None],
@@ -320,6 +367,7 @@ fn new_player(w: &mut World, name: String, texture: String, color_idx: usize) ->
     w.shield.push(false);
     w.bounce.push(true);
     w.explode.push((false, false));
+    w.active_weapon.push(Some(Weapon::Missile));
 
     // placeholder, set later in to_start_positions
     w.position.push(vec![Pos::nil()]);
@@ -336,7 +384,7 @@ fn new_missile(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
     w.sprite.push(Sprite {
         color_idx,
         is_bold: false,
-        frame_num: 0,
+        _frame_num: 0,
         texture_vertical: vec!["*".to_string()],
         texture_horizontal: vec!["*".to_string()],
         texture_explosion: vec![Some("#".to_string())],
@@ -345,6 +393,7 @@ fn new_missile(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
     w.shield.push(false);
     w.bounce.push(false);
     w.explode.push((true, false));
+    w.active_weapon.push(None);
 }
 
 fn new_ray(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
@@ -370,7 +419,7 @@ fn new_ray(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
     w.sprite.push(Sprite {
         color_idx,
         is_bold: false,
-        frame_num: 0,
+        _frame_num: 0,
         texture_vertical: vec!["|".to_string()],
         texture_horizontal: vec!["-".to_string()],
         texture_explosion: vec![None],
@@ -379,15 +428,39 @@ fn new_ray(w: &mut World, start_pos: Pos, dir: Dir, color_idx: usize) {
     w.shield.push(true); // does not get destroyed by a collision
     w.bounce.push(false);
     w.explode.push((false, false));
+    w.active_weapon.push(None);
 }
 
+fn new_bar(w: &mut World, start_pos: Pos, dir: Dir) {
+    w.name.push(format!("Bar {}", w.name.len()));
+    w.alive.push(true);
+    w.lifetime.push(Lifetime::Solid);
+    w.position.push(vec![start_pos]);
+    w.velocity.push((0, dir));
+    w.sprite.push(Sprite {
+        color_idx: 0,
+        is_bold: false,
+        _frame_num: 0,
+        texture_vertical: vec!["┃".to_string()],
+        texture_horizontal: vec!["━".to_string()],
+        texture_explosion: vec![Some("#".to_string())],
+    });
+    w.energy.push(0);
+    w.shield.push(true);
+    w.bounce.push(false);
+    w.explode.push((false, false));
+    w.active_weapon.push(None);
+}
+
+#[derive(PartialEq)]
 enum Lifetime {
-    Permanent,
-    Temporary(u32),
+    Solid,          // obstacle: does not get damaged, stops things
+    Permanent,      // player: always on screen
+    Temporary(u32), // missile/ray: displays for a while then vanishes
 }
 
 struct Sprite {
-    frame_num: u32,
+    _frame_num: u32,
     color_idx: usize,
     is_bold: bool,
     texture_vertical: Vec<String>, // actually just the char to print, but sounds fancy
@@ -411,12 +484,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         "R U S T   C O N S O L E   G A M E",
         "",
         "Instructions:",
-        "Player 1   Move: w a s d.    Fire modifier: Shift",
-        "Player 2   Move: Arrow keys. Fire modifier: Alt  ",
+        "Player 1   Move: w a s d.    Fire: Shift + direction. Toggle shield: e. Change weapon: q",
+        "Player 2   Move: Arrow keys. Fire: Alt + direction. Toggle shield: .. Change weapon: ,",
         "",
-        "With fire  modifier: Up = Missile, Down = Toggle Shield, Left = Death Ray, Right = Teleport",
-        "",
-        "Esc to quit                                      ",
+        "Esc to quit",
         "Press any key to start",
     ])?;
 
@@ -429,7 +500,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         player2: 0,
         p1_lives: PLAYER_LIVES,
         p2_lives: PLAYER_LIVES,
-        missile_range: width as u32 / 4,
+        missile_range: width as u32 / 6,
 
         name: Vec::new(),
         alive: Vec::new(),
@@ -441,9 +512,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         shield: Vec::new(),
         bounce: Vec::new(),
         explode: Vec::new(),
+        active_weapon: Vec::new(),
         // remember to add to reset() as well
     };
     world.add_players();
+    world.add_obstacles();
 
     while both_players_alive(&world) {
         input::wait_for_keypress();
@@ -497,7 +570,6 @@ fn winner_banner<T: Output>(w: &mut World, out: &mut T) -> Result<(), Box<dyn Er
 
 // Returns Ok(true) when it's time to exit
 fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Error>> {
-    let mut rng = thread_rng();
     w.alive[w.player1] = true;
     w.alive[w.player2] = true;
 
@@ -520,56 +592,70 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Erro
                     is_quit = true;
                     break;
                 }
+
                 InputEvent::Move { entity_id, dir } if *entity_id == 1 => {
-                    w.velocity[w.player1].1 = *dir
+                    let cur = &mut w.velocity[w.player1].1;
+                    if cur.opposite() == *dir {
+                        *cur = Dir::None;
+                    } else {
+                        *cur = *dir;
+                    }
                 }
                 InputEvent::Move { entity_id, dir } if *entity_id == 2 => {
-                    w.velocity[w.player2].1 = *dir
+                    let cur = &mut w.velocity[w.player2].1;
+                    if cur.opposite() == *dir {
+                        *cur = Dir::None;
+                    } else {
+                        *cur = *dir;
+                    }
                 }
+
+                InputEvent::ToggleShield { entity_id } if *entity_id == 1 => {
+                    w.shield[w.player1] = !w.shield[w.player1];
+                }
+                InputEvent::ToggleShield { entity_id } if *entity_id == 2 => {
+                    w.shield[w.player2] = !w.shield[w.player2];
+                }
+
+                InputEvent::ChangeWeapon { entity_id } if *entity_id == 1 => {
+                    w.active_weapon[w.player1].as_mut().unwrap().next();
+                }
+                InputEvent::ChangeWeapon { entity_id } if *entity_id == 2 => {
+                    w.active_weapon[w.player2].as_mut().unwrap().next();
+                }
+
                 InputEvent::Fire { entity_id, kind } => {
                     let id = match entity_id {
                         1 => w.player1,
                         2 => w.player2,
                         _ => panic!("impossible player id"),
                     };
-                    let (mut pos, dir) = (w.position[id][0], w.velocity[id].1);
-                    if dir == Dir::None {
-                        continue; // can't fire when not moving
-                    }
+                    let mut pos = w.position[id][0];
+                    let dir = match kind {
+                        input::FireKind::Up => Dir::Up,
+                        input::FireKind::Down => Dir::Down,
+                        input::FireKind::Left => Dir::Left,
+                        input::FireKind::Right => Dir::Right,
+                    };
 
                     // move ahead of the player
                     pos = pos.moved(2, dir);
-                    if !is_on_board(pos, w.width, w.height) {
+                    if !w.is_on_board(pos) {
                         continue;
                     }
 
                     let e = w.energy[id];
-                    match kind {
-                        input::FireKind::Up => {
+                    match w.active_weapon[id].as_ref().unwrap() {
+                        Weapon::Missile => {
                             if e > ENERGY_MISSILE {
                                 new_missile(w, pos, dir, w.sprite[id].color_idx);
                                 w.energy[id] -= ENERGY_MISSILE;
                             }
                         }
-                        input::FireKind::Down => {
-                            w.shield[id] = !w.shield[id];
-                        }
-                        input::FireKind::Left => {
+                        Weapon::Ray => {
                             if e > ENERGY_RAY {
                                 new_ray(w, pos, dir, w.sprite[id].color_idx);
                                 w.energy[id] -= ENERGY_RAY;
-                            }
-                        }
-                        input::FireKind::Right => {
-                            if e > ENERGY_TELEPORT {
-                                // Make the ranges match is_on_board
-                                let new_pos = Pos {
-                                    x: rng.gen_range(1..w.width),      // 1 to width-1
-                                    y: rng.gen_range(2..w.height - 1), // 2 to height-2
-                                    invalid: false,
-                                };
-                                w.position[id][0] = new_pos;
-                                w.energy[id] -= ENERGY_TELEPORT;
                             }
                         }
                     }
@@ -624,9 +710,4 @@ fn to_start_positions(w: &mut World) {
     };
     w.position[p2][0] = p2_pos;
     w.velocity[p2].1 = Dir::None;
-}
-
-fn is_on_board(pos: Pos, w: u32, h: u32) -> bool {
-    // If changing here also update teleport
-    !pos.invalid && 1 <= pos.x && pos.x < w - 1 && 2 <= pos.y && pos.y < h - 2
 }

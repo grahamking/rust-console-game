@@ -58,24 +58,29 @@ impl ConsoleOutput {
 
     fn draw_status(&mut self, world: &crate::World) -> Result<(), Box<dyn Error>> {
         let third_width = self.w / 3;
+
         let mut player1 = format!(
-            "Player 1: {} / {}. Energy: {}",
+            "Player 1: {} / {}. Energy: {}. Weapon: {:7}",
             world.p1_lives,
             crate::PLAYER_LIVES,
             world.energy[world.player1],
+            world.active_weapon[world.player1].as_ref().unwrap().name(),
         );
         if world.shield[world.player1] {
             player1 += ". SHIELD ON.";
         }
+
         let mut player2 = format!(
-            "Player 2: {} / {}. Energy: {}",
+            "Player 2: {} / {}. Energy: {}. Weapon: {:7}",
             world.p2_lives,
             crate::PLAYER_LIVES,
             world.energy[world.player2],
+            world.active_weapon[world.player2].as_ref().unwrap().name(),
         );
         if world.shield[world.player2] {
             player2 += ". SHIELD ON.";
         }
+
         queue!(
             self.writer,
             cursor::MoveTo(third_width - player1.len() as u16 / 2, 0),

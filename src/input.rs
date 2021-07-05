@@ -9,6 +9,8 @@ use crate::dir::Dir;
 pub enum InputEvent {
     Move { entity_id: u8, dir: Dir },
     Fire { entity_id: u8, kind: FireKind },
+    ToggleShield { entity_id: u8 },
+    ChangeWeapon { entity_id: u8 },
     Quit,
 }
 
@@ -77,6 +79,8 @@ pub fn events() -> Result<Vec<InputEvent>, Box<dyn Error>> {
                 entity_id: 1,
                 kind: FireKind::Right,
             }),
+            KeyCode::Char('e') => ev.push(InputEvent::ToggleShield { entity_id: 1 }),
+            KeyCode::Char('q') => ev.push(InputEvent::ChangeWeapon { entity_id: 1 }),
 
             // player two keys
             KeyCode::Up => {
@@ -131,6 +135,9 @@ pub fn events() -> Result<Vec<InputEvent>, Box<dyn Error>> {
                     });
                 }
             }
+            KeyCode::Char('.') => ev.push(InputEvent::ToggleShield { entity_id: 2 }),
+            KeyCode::Char(',') => ev.push(InputEvent::ChangeWeapon { entity_id: 2 }),
+
             _ => (),
         };
     }
