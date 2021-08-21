@@ -15,21 +15,10 @@ use crate::dir::Dir;
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum InputEvent {
     Move { entity_id: u8, dir: Dir },
-    Fire { entity_id: u8, kind: FireKind },
+    Fire { entity_id: u8, dir: Dir },
     ToggleShield { entity_id: u8 },
     ChangeWeapon { entity_id: u8 },
     Quit,
-}
-
-// Different weapon systems. Input module doesn't decide what those are, just reports
-// which one was triggered.
-// TODO: What not use Dir instead?
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum FireKind {
-    Up,
-    Down,
-    Left,
-    Right,
 }
 
 pub fn start(ch: sync::mpsc::Sender<InputEvent>, frame_gap_ms: u64) -> (thread::JoinHandle<()>, Arc<AtomicBool>) {
@@ -82,7 +71,7 @@ pub fn events(poll_dur: Duration) -> Result<Vec<InputEvent>, Box<dyn Error>> {
             }),
             KeyCode::Char('W') => ev.push(InputEvent::Fire {
                 entity_id: 1,
-                kind: FireKind::Up,
+                dir: Dir::Up,
             }),
             KeyCode::Char('s') => ev.push(InputEvent::Move {
                 entity_id: 1,
@@ -90,7 +79,7 @@ pub fn events(poll_dur: Duration) -> Result<Vec<InputEvent>, Box<dyn Error>> {
             }),
             KeyCode::Char('S') => ev.push(InputEvent::Fire {
                 entity_id: 1,
-                kind: FireKind::Down,
+                dir: Dir::Down,
             }),
             KeyCode::Char('a') => ev.push(InputEvent::Move {
                 entity_id: 1,
@@ -98,7 +87,7 @@ pub fn events(poll_dur: Duration) -> Result<Vec<InputEvent>, Box<dyn Error>> {
             }),
             KeyCode::Char('A') => ev.push(InputEvent::Fire {
                 entity_id: 1,
-                kind: FireKind::Left,
+                dir: Dir::Left,
             }),
             KeyCode::Char('d') => ev.push(InputEvent::Move {
                 entity_id: 1,
@@ -106,7 +95,7 @@ pub fn events(poll_dur: Duration) -> Result<Vec<InputEvent>, Box<dyn Error>> {
             }),
             KeyCode::Char('D') => ev.push(InputEvent::Fire {
                 entity_id: 1,
-                kind: FireKind::Right,
+                dir: Dir::Right,
             }),
             KeyCode::Char('e') => ev.push(InputEvent::ToggleShield { entity_id: 1 }),
             KeyCode::Char('q') => ev.push(InputEvent::ChangeWeapon { entity_id: 1 }),
@@ -116,7 +105,7 @@ pub fn events(poll_dur: Duration) -> Result<Vec<InputEvent>, Box<dyn Error>> {
                 if alt {
                     ev.push(InputEvent::Fire {
                         entity_id: 2,
-                        kind: FireKind::Up,
+                        dir: Dir::Up,
                     });
                 } else {
                     ev.push(InputEvent::Move {
@@ -129,7 +118,7 @@ pub fn events(poll_dur: Duration) -> Result<Vec<InputEvent>, Box<dyn Error>> {
                 if alt {
                     ev.push(InputEvent::Fire {
                         entity_id: 2,
-                        kind: FireKind::Down,
+                        dir: Dir::Down,
                     });
                 } else {
                     ev.push(InputEvent::Move {
@@ -142,7 +131,7 @@ pub fn events(poll_dur: Duration) -> Result<Vec<InputEvent>, Box<dyn Error>> {
                 if alt {
                     ev.push(InputEvent::Fire {
                         entity_id: 2,
-                        kind: FireKind::Left,
+                        dir: Dir::Left,
                     });
                 } else {
                     ev.push(InputEvent::Move {
@@ -155,7 +144,7 @@ pub fn events(poll_dur: Duration) -> Result<Vec<InputEvent>, Box<dyn Error>> {
                 if alt {
                     ev.push(InputEvent::Fire {
                         entity_id: 2,
-                        kind: FireKind::Right,
+                        dir: Dir::Right,
                     });
                 } else {
                     ev.push(InputEvent::Move {

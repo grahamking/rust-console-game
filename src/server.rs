@@ -11,13 +11,11 @@ use log::{debug, error};
 
 use crate::InputEvent;
 use crate::dir::Dir;
-use crate::input::FireKind;
 
 pub const SOCK_NAME_1: &str = "/tmp/rust-console-game-p1.sock";
 pub const SOCK_NAME_2: &str = "/tmp/rust-console-game-p2.sock";
 
-const MOVE_DIRS: [Dir; 4] = [Dir::Up, Dir::Down, Dir::Left, Dir::Right];
-const FIRE_DIRS: [FireKind; 4] = [FireKind::Up, FireKind::Down, FireKind::Left, FireKind::Right];
+const DIRS: [Dir; 4] = [Dir::Up, Dir::Down, Dir::Left, Dir::Right];
 
 pub fn start(ch: sync::mpsc::Sender<InputEvent>) -> (thread::JoinHandle<()>, thread::JoinHandle<()>) {
     let ch_clone = ch.clone();
@@ -70,13 +68,13 @@ fn into_input_event(b: &[u8; 8], entity_id: u8) -> InputEvent {
         1 => {
             InputEvent::Move {
                 entity_id,
-                dir: MOVE_DIRS[b[1] as usize],
+                dir: DIRS[b[1] as usize],
             }
         },
         2 => {
             InputEvent::Fire {
                 entity_id,
-                kind: FIRE_DIRS[b[1] as usize],
+                dir: DIRS[b[1] as usize],
             }
         },
         3 => InputEvent::ToggleShield { entity_id },

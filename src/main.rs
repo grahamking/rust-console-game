@@ -659,19 +659,13 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::R
                     w.active_weapon[w.player2].as_mut().unwrap().next();
                 }
 
-                InputEvent::Fire { entity_id, kind } => {
+                InputEvent::Fire { entity_id, dir } => {
                     let id = match entity_id {
                         1 => w.player1,
                         2 => w.player2,
                         _ => panic!("impossible player id"),
                     };
                     let mut pos = w.position[id][0];
-                    let dir = match kind {
-                        input::FireKind::Up => Dir::Up,
-                        input::FireKind::Down => Dir::Down,
-                        input::FireKind::Left => Dir::Left,
-                        input::FireKind::Right => Dir::Right,
-                    };
 
                     // if firing forward move ahead of the player
                     if dir == w.velocity[id].1 {
