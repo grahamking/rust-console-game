@@ -21,7 +21,7 @@ pub fn start(ch: sync::mpsc::Sender<InputEvent>) -> (thread::JoinHandle<()>, thr
     let ch_clone = ch.clone();
     let p1 = thread::spawn(move || server_main(SOCK_NAME_1, 1, ch_clone));
     let p2 = thread::spawn(move || server_main(SOCK_NAME_2, 2, ch));
-    return (p1, p2);
+    (p1, p2)
 }
 
 fn server_main(sock_name: &str, entity_id: u8, ch: sync::mpsc::Sender<InputEvent>) {

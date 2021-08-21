@@ -546,9 +546,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (ch_tx, mut ch_rx) = sync::mpsc::channel();
     let (k_thread, k_stop) = input::start(ch_tx.clone(), FRAME_GAP_MS);
-    server::start(ch_tx.clone()); // we don't 'join' the server thread, when main loop exits it does also
-
-    // TODO: move keyboard handling to a thread, send InputEvent on ch_tx
+    server::start(ch_tx); // we don't 'join' the server thread, when main loop exits it does also
 
     while both_players_alive(&world) {
         input::wait_for_keypress();
