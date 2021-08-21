@@ -4,11 +4,13 @@ use std::error::Error;
 use std::fs::File;
 use std::thread;
 use std::time::Duration;
+use std::sync;
 
 #[macro_use]
 extern crate lazy_static;
 
 mod console;
+mod server;
 
 mod dir;
 use dir::Dir;
@@ -542,9 +544,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     world.add_players();
     world.add_obstacles();
 
+    let (ch_tx, mut ch_rx) = sync::mpsc::channel();
+    let (k_thread, k_stop) = input::start(ch_tx.clone(), FRAME_GAP_MS);
+    server::start(ch_tx.clone()); // we don't 'join' the server thread, when main loop exits it does also
+
+    // TODO: move keyboard handling to a thread, send InputEvent on ch_tx
+
     while both_players_alive(&world) {
         input::wait_for_keypress();
-        if game_loop(&mut world, &mut out)? {
+        if game_loop(&mut world, &mut out, &mut ch_rx)? {
             break; // user pressed quit
         }
 
@@ -577,6 +585,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         winner_banner(&mut world, &mut out)?;
     }
     out.cleanup()?;
+    k_stop.store(true, sync::atomic::Ordering::SeqCst);
+    k_thread.join().unwrap();
 
     Ok(())
 }
@@ -593,7 +603,7 @@ fn winner_banner<T: Output>(w: &mut World, out: &mut T) -> Result<(), Box<dyn Er
 }
 
 // Returns Ok(true) when it's time to exit
-fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Error>> {
+fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::Receiver<InputEvent>) -> Result<bool, Box<dyn Error>> {
     w.alive[w.player1] = true;
     w.alive[w.player2] = true;
 
@@ -610,41 +620,42 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T) -> Result<bool, Box<dyn Erro
 
     let mut is_quit = false;
     while !is_quit && both_players_standing(w) {
-        for ie in input::events()?.iter() {
+
+        for ie in input_ch.try_iter() { // for ie in input::events()? {
             match ie {
                 InputEvent::Quit => {
                     is_quit = true;
                     break;
                 }
 
-                InputEvent::Move { entity_id, dir } if *entity_id == 1 => {
+                InputEvent::Move { entity_id, dir } if entity_id == 1 => {
                     let cur = &mut w.velocity[w.player1].1;
-                    if cur.opposite() == *dir {
+                    if cur.opposite() == dir {
                         *cur = Dir::None;
                     } else {
-                        *cur = *dir;
+                        *cur = dir;
                     }
                 }
-                InputEvent::Move { entity_id, dir } if *entity_id == 2 => {
+                InputEvent::Move { entity_id, dir } if entity_id == 2 => {
                     let cur = &mut w.velocity[w.player2].1;
-                    if cur.opposite() == *dir {
+                    if cur.opposite() == dir {
                         *cur = Dir::None;
                     } else {
-                        *cur = *dir;
+                        *cur = dir;
                     }
                 }
 
-                InputEvent::ToggleShield { entity_id } if *entity_id == 1 => {
+                InputEvent::ToggleShield { entity_id } if entity_id == 1 => {
                     w.shield[w.player1] = !w.shield[w.player1];
                 }
-                InputEvent::ToggleShield { entity_id } if *entity_id == 2 => {
+                InputEvent::ToggleShield { entity_id } if entity_id == 2 => {
                     w.shield[w.player2] = !w.shield[w.player2];
                 }
 
-                InputEvent::ChangeWeapon { entity_id } if *entity_id == 1 => {
+                InputEvent::ChangeWeapon { entity_id } if entity_id == 1 => {
                     w.active_weapon[w.player1].as_mut().unwrap().next();
                 }
-                InputEvent::ChangeWeapon { entity_id } if *entity_id == 2 => {
+                InputEvent::ChangeWeapon { entity_id } if entity_id == 2 => {
                     w.active_weapon[w.player2].as_mut().unwrap().next();
                 }
 
