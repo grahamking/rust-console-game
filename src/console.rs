@@ -57,10 +57,10 @@ impl ConsoleOutput {
     }
 
     fn draw_status(&mut self, world: &crate::World) -> Result<(), Box<dyn Error>> {
-        let third_width = self.w / 3;
+        let quarter_width = self.w / 4;
 
         let mut player1 = format!(
-            "Player 1: {} / {}. Energy: {}. Weapon: {:7}",
+            "Lives: {} / {}. Nrg: {}. Wpn: {:7}. Keys: wasd,shift+wasd,e,q.",
             world.p1_lives,
             crate::PLAYER_LIVES,
             world.energy[world.player1],
@@ -71,7 +71,7 @@ impl ConsoleOutput {
         }
 
         let mut player2 = format!(
-            "Player 2: {} / {}. Energy: {}. Weapon: {:7}",
+            "Lives: {} / {}. Nrg: {}. Wpn: {:7}. Keys: arrows,alt+arrows,period,comma.",
             world.p2_lives,
             crate::PLAYER_LIVES,
             world.energy[world.player2],
@@ -83,10 +83,10 @@ impl ConsoleOutput {
 
         queue!(
             self.writer,
-            cursor::MoveTo(third_width - player1.len() as u16 / 2, 0),
+            cursor::MoveTo(quarter_width - player1.len() as u16 / 2, 0),
             style::SetForegroundColor(COLORS[1]),
             style::Print(player1),
-            cursor::MoveTo(2 * third_width - player2.len() as u16 / 2, 0),
+            cursor::MoveTo(3 * quarter_width - player2.len() as u16 / 2, 0),
             style::SetForegroundColor(COLORS[2]),
             style::Print(player2),
             style::ResetColor,
