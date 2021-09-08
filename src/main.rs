@@ -272,7 +272,7 @@ struct World {
     // components
     lifetime: Vec<Lifetime>, // how long it displays for
     sprite: Vec<Sprite>,
-    velocity: Vec<(u32, Dir)>, // (quantity, direction)
+    velocity: Vec<(u8, Dir)>, // (quantity, direction)
     position: Vec<Vec<Pos>>,
     energy: Vec<u32>,
     shield: Vec<bool>,
@@ -339,6 +339,27 @@ impl World {
         }
 
         true
+    }
+
+    // A representation of the state of all our entities,
+    // for sending to clients.
+    // This is actually protocol, so should be in server, but that would
+    // require either making most of World's fields public, or introducing
+    // an unnecessary intermediate format.
+    fn entity_state(&self) -> Vec<u8> {
+        let mut state = Vec::with_capacity(self.name.len() * 12);
+        for (entity_id, _) in self.name.iter().enumerate() {
+
+            // protocol is: entity_id(u8) x(u32) y(u32) dir(u8) velocity(u8) shield(u8)
+
+            state.push(entity_id as u8);
+            state.extend_from_slice(&self.position[entity_id][0].x.to_be_bytes());
+            state.extend_from_slice(&self.position[entity_id][0].y.to_be_bytes());
+            state.push(self.velocity[entity_id].1.as_num());
+            state.push(self.velocity[entity_id].0);
+            state.push(if self.shield[entity_id] { 1 } else { 0 });
+        }
+        state
     }
 }
 
@@ -546,11 +567,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (ch_tx, mut ch_rx) = sync::mpsc::channel();
     let (k_thread, k_stop) = input::start(ch_tx.clone(), FRAME_GAP_MS);
-    server::start(ch_tx); // we don't 'join' the server thread, when main loop exits it does also
+
+    let srv = server::Server::new(1, ch_tx);
 
     while both_players_alive(&world) {
         input::wait_for_keypress();
-        if game_loop(&mut world, &mut out, &mut ch_rx)? {
+        if game_loop(&mut world, &mut out, &mut ch_rx, &srv)? {
             break; // user pressed quit
         }
 
@@ -601,7 +623,7 @@ fn winner_banner<T: Output>(w: &mut World, out: &mut T) -> Result<(), Box<dyn Er
 }
 
 // Returns Ok(true) when it's time to exit
-fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::Receiver<InputEvent>) -> Result<bool, Box<dyn Error>> {
+fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::Receiver<InputEvent>, srv: &server::Server) -> Result<bool, Box<dyn Error>> {
     w.alive[w.player1] = true;
     w.alive[w.player2] = true;
 
@@ -701,6 +723,7 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::R
             s.step(w);
         }
         render.render(w, out);
+        srv.send_state(w.entity_state());
 
         if DEBUG_SPEED {
             thread::sleep(Duration::from_secs(1));

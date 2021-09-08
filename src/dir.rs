@@ -25,6 +25,17 @@ impl Dir {
     pub fn _is_horizontal(&self) -> bool {
         *self == Dir::Left || *self == Dir::Right
     }
+
+    // ideally should match server::DIRS indexes
+    pub fn as_num(&self) -> u8 {
+        match self {
+            Dir::None => 0,
+            Dir::Up => 1,
+            Dir::Down => 2,
+            Dir::Left => 3,
+            Dir::Right => 4,
+        }
+    }
 }
 
 impl Display for Dir {
