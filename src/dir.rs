@@ -9,7 +9,13 @@ pub enum Dir {
     Right,
 }
 
+const DIRS: [Dir; 5] = [Dir::None, Dir::Up, Dir::Down, Dir::Left, Dir::Right];
+
 impl Dir {
+    pub fn from_num(n: u8) -> Dir {
+        DIRS[n as usize]
+    }
+
     pub fn opposite(&self) -> Dir {
         match self {
             Dir::Up => Dir::Down,
@@ -26,7 +32,6 @@ impl Dir {
         *self == Dir::Left || *self == Dir::Right
     }
 
-    // ideally should match server::DIRS indexes
     pub fn as_num(&self) -> u8 {
         match self {
             Dir::None => 0,

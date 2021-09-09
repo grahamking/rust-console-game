@@ -7,11 +7,8 @@ use std::time;
 use std::convert::TryInto;
 use std::io::ErrorKind;
 
-use anyhow;
-
-// TODO: import from server.rs
-const SOCK_NAME_1: &str = "/tmp/rust-console-game-p1.sock";
-const SOCK_NAME_2: &str = "/tmp/rust-console-game-p2.sock";
+use rust_console_game::server;
+use rust_console_game::dir::Dir;
 
 const FIRE: u8 = 2;
 
@@ -26,9 +23,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     let sock_path = match args[0].as_str() {
-        "1" => SOCK_NAME_1,
-        "2" =>  SOCK_NAME_2,
-        _ =>  SOCK_NAME_1,
+        "2" =>  server::SOCK_NAME_2,
+        _ =>  server::SOCK_NAME_1,
     };
 
     let mut sock_out = match net::UnixStream::connect(sock_path) {
@@ -79,7 +75,7 @@ struct EntityState {
     id: u8,
     x: u32,
     y: u32,
-    dir: u8, // todo should be dir::Dir
+    dir: Dir,
     velocity: u8,
     has_shield: bool,
 }
@@ -88,7 +84,7 @@ impl EntityState {
         //println!("GOT: {:?}", msg);
         let mut e = EntityState{
             id: msg[0],
-            dir: msg[9],
+            dir: Dir::from_num(msg[9]),
             velocity: msg[10],
             has_shield: msg[11] == 1,
             x: 0,

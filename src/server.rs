@@ -2,6 +2,7 @@ use std::thread;
 use std::path;
 use std::fs;
 use std::os::unix::net;
+use std::net::Shutdown;
 use std::error;
 use std::io::ErrorKind;
 use std::io::{Read, Write};
@@ -15,11 +16,9 @@ use crate::dir::Dir;
 pub const SOCK_NAME_1: &str = "/tmp/rust-console-game-p1.sock";
 pub const SOCK_NAME_2: &str = "/tmp/rust-console-game-p2.sock";
 
-const DIRS: [Dir; 5] = [Dir::None, Dir::Up, Dir::Down, Dir::Left, Dir::Right];
-
 pub struct Server {
     entity_id: u8,
-    conns: Mutex<Vec<net::UnixStream>>,
+    conn: Mutex<Option<net::UnixStream>>,
 }
 
 impl Server {
@@ -33,11 +32,12 @@ impl Server {
         };
         let s = Arc::new(Server{
             entity_id: player,
-            conns: Mutex::new(Vec::new()),
+            conn: Mutex::new(Option::None),
         });
 
         let inner_s = s.clone();
         let _ = thread::spawn(move || inner_s.run(sock_name, ch));
+
         s
     }
 
@@ -61,7 +61,7 @@ impl Server {
                             return;
                         }
                     };
-                    self.conns.lock().unwrap().push(out_conn);
+                    self.conn.lock().unwrap().replace(out_conn);
 
                     handler(conn, self.entity_id, ch.clone()).unwrap();
                 },
@@ -71,13 +71,17 @@ impl Server {
     }
 
     // send all our connections the latest world state. called every tick
-    pub fn send_state(&self, state: Vec<u8>) {
-        self.conns.lock().unwrap().iter_mut().for_each(|c| {
-            if let Err(e) = c.write_all(&state) {
-                error!("server.send_state err: {}", e);
-                // TODO: remove connection from conns, it's gone
-            }
-        });
+    pub fn send_state(&self, state: &[u8]) {
+        let mut l = self.conn.lock().unwrap();
+        if l.is_none() {
+            return;
+        }
+        if let Err(e) = l.as_mut().unwrap().write_all(state) {
+            error!("server.send_state err: {}", e);
+            let c = l.take().unwrap();
+            // should happen at most once
+            c.shutdown(Shutdown::Both).expect("server: conn shutdown err");
+        }
     }
 
 }
@@ -105,13 +109,13 @@ fn into_input_event(b: &[u8; 8], entity_id: u8) -> InputEvent {
         1 => {
             InputEvent::Move {
                 entity_id,
-                dir: DIRS[b[1] as usize],
+                dir: Dir::from_num(b[1]),
             }
         },
         2 => {
             InputEvent::Fire {
                 entity_id,
-                dir: DIRS[b[1] as usize],
+                dir: Dir::from_num(b[1]),
             }
         },
         3 => InputEvent::ToggleShield { entity_id },

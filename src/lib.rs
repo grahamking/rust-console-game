@@ -10,9 +10,9 @@ use std::sync;
 extern crate lazy_static;
 
 mod console;
-mod server;
+pub mod server;
 
-mod dir;
+pub mod dir;
 use dir::Dir;
 
 mod pos;
@@ -514,7 +514,8 @@ struct Sprite {
     texture_explosion: Vec<Option<String>>,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+// MAIN
+pub fn run() -> Result<(), Box<dyn Error>> {
     if DEBUG {
         WriteLogger::init(
             LevelFilter::Trace,
@@ -568,11 +569,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (ch_tx, mut ch_rx) = sync::mpsc::channel();
     let (k_thread, k_stop) = input::start(ch_tx.clone(), FRAME_GAP_MS);
 
-    let srv = server::Server::new(1, ch_tx);
+    let srv1 = server::Server::new(1, ch_tx.clone());
+    let srv2 = server::Server::new(2, ch_tx);
 
     while both_players_alive(&world) {
         input::wait_for_keypress();
-        if game_loop(&mut world, &mut out, &mut ch_rx, &srv)? {
+        if game_loop(&mut world, &mut out, &mut ch_rx, [&srv1, &srv2])? {
             break; // user pressed quit
         }
 
@@ -623,7 +625,7 @@ fn winner_banner<T: Output>(w: &mut World, out: &mut T) -> Result<(), Box<dyn Er
 }
 
 // Returns Ok(true) when it's time to exit
-fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::Receiver<InputEvent>, srv: &server::Server) -> Result<bool, Box<dyn Error>> {
+fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::Receiver<InputEvent>, srv: [&server::Server; 2]) -> Result<bool, Box<dyn Error>> {
     w.alive[w.player1] = true;
     w.alive[w.player2] = true;
 
@@ -723,7 +725,12 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::R
             s.step(w);
         }
         render.render(w, out);
-        srv.send_state(w.entity_state());
+
+        // update bots
+        let es = w.entity_state();
+        for s in srv.iter() {
+            s.send_state(&es);
+        }
 
         if DEBUG_SPEED {
             thread::sleep(Duration::from_secs(1));
