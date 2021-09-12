@@ -28,6 +28,7 @@ const PLAYER_LIVES: u32 = 10;
 const MAX_ENERGY: u32 = 100;
 const LIFETIME_RAY: u32 = 10;
 const EXPLODE_DURATION: u32 = 2;
+const MISSILE_MIN_RANGE: u32 = 8; // missiles must go at least this far before exploding
 const ENERGY_MISSILE: u32 = 3;
 const ENERGY_RAY: u32 = 25;
 const ENERGY_SHIELD: u32 = 3; // deduct this every ENERGY_EVERY
@@ -348,7 +349,7 @@ impl World {
     // an unnecessary intermediate format.
     fn entity_state(&self) -> Vec<u8> {
         let mut state = Vec::with_capacity(self.name.len() * 12);
-        for (entity_id, _) in self.name.iter().enumerate() {
+        for (entity_id, _name) in self.name.iter().enumerate() {
 
             // protocol is: entity_id(u8) x(u32) y(u32) dir(u8) velocity(u8) shield(u8)
 
@@ -547,8 +548,8 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         player2: 0,
         p1_lives: PLAYER_LIVES,
         p2_lives: PLAYER_LIVES,
-        missile_range_horizontal: width as u32 / 6,
-        missile_range_vertical: height as u32 / 5,
+        missile_range_horizontal: (width as u32 / 6).max(MISSILE_MIN_RANGE),
+        missile_range_vertical: (height as u32 / 5).max(MISSILE_MIN_RANGE),
 
         name: Vec::new(),
         alive: Vec::new(),
