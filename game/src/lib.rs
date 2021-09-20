@@ -5,15 +5,13 @@ use std::fs::File;
 use std::thread;
 use std::time::Duration;
 use std::sync;
+use rs_sdk::Dir;
 
 #[macro_use]
 extern crate lazy_static;
 
 mod console;
 pub mod server;
-
-pub mod dir;
-use dir::Dir;
 
 mod pos;
 use pos::Pos;

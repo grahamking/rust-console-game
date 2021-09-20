@@ -9,8 +9,7 @@ use std::io::ErrorKind;
 use std::sync::{Arc, Mutex};
 use std::cmp::Ordering;
 
-use rust_console_game::server;
-use rust_console_game::dir::Dir;
+use rs_sdk::{Dir, SOCK_NAME_1, SOCK_NAME_2};
 
 // must match the order in which players are added in src/lib.rs
 const PLAYER_1_ID: u8 = 0;
@@ -32,8 +31,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     let (player_id, opponent_id, sock_path) = match args[0].as_str() {
-        "2" =>  (PLAYER_2_ID, PLAYER_1_ID, server::SOCK_NAME_2),
-        _ =>  (PLAYER_1_ID, PLAYER_2_ID, server::SOCK_NAME_1),
+        "2" =>  (PLAYER_2_ID, PLAYER_1_ID, SOCK_NAME_2),
+        _ =>  (PLAYER_1_ID, PLAYER_2_ID, SOCK_NAME_1),
     };
 
     let mut sock_out = match net::UnixStream::connect(sock_path) {

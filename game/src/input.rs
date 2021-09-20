@@ -1,16 +1,16 @@
-use crossterm::event;
-use crossterm::event::KeyCode;
-
 use std::error::Error;
 use std::time::Duration;
 use std::sync::{self, Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
-
 use std::thread;
+
+use crossterm::event;
+use crossterm::event::KeyCode;
+
+use rs_sdk::Dir;
 
 use log::error;
 
-use crate::dir::Dir;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum InputEvent {
