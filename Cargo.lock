@@ -256,6 +256,9 @@ dependencies = [
 [[package]]
 name = "rs-sdk"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
 
 [[package]]
 name = "rust-console-game"
