@@ -1,11 +1,11 @@
 use log::debug;
+use rs_sdk::Dir;
 use simplelog::{Config, LevelFilter, WriteLogger};
 use std::error::Error;
 use std::fs::File;
+use std::sync;
 use std::thread;
 use std::time::Duration;
-use std::sync;
-use rs_sdk::Dir;
 
 #[macro_use]
 extern crate lazy_static;
@@ -53,6 +53,7 @@ trait Output {
     fn banner(&mut self, msg: &[&str]) -> Result<(), Box<dyn Error>>;
 
     // Draw a string. Debug, unused.
+    #[allow(dead_code)]
     fn print(&mut self, x: u16, y: u16, s: &str) -> Result<(), Box<dyn Error>>;
 
     // Reset screen, quit
@@ -348,7 +349,6 @@ impl World {
     fn entity_state(&self) -> Vec<u8> {
         let mut state = Vec::with_capacity(self.name.len() * 12);
         for (entity_id, _name) in self.name.iter().enumerate() {
-
             // protocol is: entity_id(u8) x(u32) y(u32) dir(u8) velocity(u8) shield(u8)
 
             state.push(entity_id as u8);
@@ -624,11 +624,16 @@ fn winner_banner<T: Output>(w: &mut World, out: &mut T) -> Result<(), Box<dyn Er
 }
 
 // Returns Ok(true) when it's time to exit
-fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::Receiver<InputEvent>, srv: [&server::Server; 2]) -> Result<bool, Box<dyn Error>> {
+fn game_loop<T: Output>(
+    w: &mut World,
+    out: &mut T,
+    input_ch: &mut sync::mpsc::Receiver<InputEvent>,
+    srv: [&server::Server; 2],
+) -> Result<bool, Box<dyn Error>> {
     w.alive[w.player1] = true;
     w.alive[w.player2] = true;
 
-    let mut system = vec![
+    let mut system = [
         System::Move,
         System::Lifetime,
         System::Collision,
@@ -641,15 +646,15 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::R
 
     let mut is_quit = false;
     while !is_quit && both_players_standing(w) {
-
-        for ie in input_ch.try_iter() { // for ie in input::events()? {
+        for ie in input_ch.try_iter() {
+            // for ie in input::events()? {
             match ie {
                 InputEvent::Quit => {
                     is_quit = true;
                     break;
                 }
 
-                InputEvent::Move { entity_id, dir } if entity_id == 1 => {
+                InputEvent::Move { entity_id: 1, dir } => {
                     let cur = &mut w.velocity[w.player1].1;
                     if cur.opposite() == dir {
                         *cur = Dir::None;
@@ -657,7 +662,7 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::R
                         *cur = dir;
                     }
                 }
-                InputEvent::Move { entity_id, dir } if entity_id == 2 => {
+                InputEvent::Move { entity_id: 2, dir } => {
                     let cur = &mut w.velocity[w.player2].1;
                     if cur.opposite() == dir {
                         *cur = Dir::None;
@@ -666,17 +671,17 @@ fn game_loop<T: Output>(w: &mut World, out: &mut T, input_ch: &mut sync::mpsc::R
                     }
                 }
 
-                InputEvent::ToggleShield { entity_id } if entity_id == 1 => {
+                InputEvent::ToggleShield { entity_id: 1 } => {
                     w.shield[w.player1] = !w.shield[w.player1];
                 }
-                InputEvent::ToggleShield { entity_id } if entity_id == 2 => {
+                InputEvent::ToggleShield { entity_id: 2 } => {
                     w.shield[w.player2] = !w.shield[w.player2];
                 }
 
-                InputEvent::ChangeWeapon { entity_id } if entity_id == 1 => {
+                InputEvent::ChangeWeapon { entity_id: 1 } => {
                     w.active_weapon[w.player1].as_mut().unwrap().next();
                 }
-                InputEvent::ChangeWeapon { entity_id } if entity_id == 2 => {
+                InputEvent::ChangeWeapon { entity_id: 2 } => {
                     w.active_weapon[w.player2].as_mut().unwrap().next();
                 }
 

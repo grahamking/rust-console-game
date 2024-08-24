@@ -1,9 +1,9 @@
-use std::os::unix::net;
-use std::io::{Read, Write};
 use std::convert::TryInto;
-use std::io::ErrorKind;
 use std::error;
 use std::fmt;
+use std::io::ErrorKind;
+use std::io::{Read, Write};
+use std::os::unix::net;
 
 mod dir;
 pub use dir::Dir;
@@ -42,7 +42,7 @@ impl Player {
 
 pub struct BotIn {
     sock_in: net::UnixStream,
-    buf: [u8; 12],  // protocol is units of 12 bytes
+    buf: [u8; 12], // protocol is units of 12 bytes
 }
 
 pub struct BotOut {
@@ -75,7 +75,7 @@ impl BotOut {
     pub fn dir(&mut self, d: Dir) -> Result<(), anyhow::Error> {
         self.move_cmd[1] = d.as_num();
         //self.send_cmd(&self.move_cmd)
-        match self.sock_out.write(&self.move_cmd) {
+        match self.sock_out.write_all(&self.move_cmd) {
             Ok(_) => Ok(()),
             Err(e) => Err(anyhow::anyhow!("socket write err: {}", e)),
         }
@@ -84,7 +84,7 @@ impl BotOut {
     // Fire in a direction
     pub fn fire(&mut self, d: Dir) -> Result<(), anyhow::Error> {
         self.fire_cmd[1] = d.as_num();
-        match self.sock_out.write(&self.fire_cmd) {
+        match self.sock_out.write_all(&self.fire_cmd) {
             Ok(_) => Ok(()),
             Err(e) => Err(anyhow::anyhow!("socket write err: {}", e)),
         }
@@ -102,12 +102,13 @@ impl BotIn {
     pub fn get_next_entity(&mut self) -> Result<EntityState, SDKError> {
         if let Err(e) = self.sock_in.read_exact(&mut self.buf) {
             match e.kind() {
-                ErrorKind::UnexpectedEof => { // remote closed connection
+                ErrorKind::UnexpectedEof => {
+                    // remote closed connection
                     return Err(SDKError::Stop);
-                },
+                }
                 _ => {
                     return Err(SDKError::Misc(format!("bot read_exact: {}", e)));
-                },
+                }
             }
         }
         Ok(EntityState::from_network(&self.buf))
@@ -125,11 +126,12 @@ impl fmt::Display for SDKError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             SDKError::Stop => write!(f, "stop"),
-            SDKError::Misc(msg) => write!(f, "{}", msg)
+            SDKError::Misc(msg) => write!(f, "{}", msg),
         }
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct EntityState {
     id: u8,
@@ -142,7 +144,7 @@ pub struct EntityState {
 impl EntityState {
     fn from_network(msg: &[u8]) -> EntityState {
         //println!("GOT: {:?}", msg);
-        let mut e = EntityState{
+        let mut e = EntityState {
             id: msg[0],
             dir: Dir::from_num(msg[9]),
             velocity: msg[10],

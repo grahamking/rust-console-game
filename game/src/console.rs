@@ -186,6 +186,6 @@ impl crate::Output for ConsoleOutput {
     }
 }
 
-fn line<T: Write>(writer: &mut T, width: u16) -> Result<(), crossterm::ErrorKind> {
+fn line<T: Write>(writer: &mut T, width: u16) -> Result<(), std::io::Error> {
     queue!(writer, style::Print("-".repeat(width as usize)))
 }
